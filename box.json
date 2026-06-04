@@ -1,0 +1,53 @@
+{
+    "name":"cbqManager",
+    "version":"1.0.0",
+    "author":"You",
+    "location":"forgeboxStorage",
+    "slug":"cbqmanager",
+    "createPackageDirectory":false,
+    "type":"mvc",
+    "language":"boxlang",
+    "keywords":"boxlang",
+    "shortDescription":"The default starter template for a ColdBox application using BoxLang",
+    "ignore":[],
+    "dependencies":{
+        "coldbox":"^8.0.0",
+        "cbsecurity":"^3.7.1+10",
+        "mementifier":"^3.7.0+7",
+        "cbvalidation":"^4.8.0+30",
+        "cbq":"^5.0.7",
+        "qb":"^13.1.0"
+    },
+    "devDependencies":{
+        "testbox":"*",
+        "route-visualizer":"*",
+        "commandbox-boxlang":"*",
+        "relax":"^4.1.1+193"
+    },
+    "installPathConventions":{
+        "modules":"lib/modules"
+    },
+    "installPaths":{
+        "coldbox":"lib/coldbox/",
+        "testbox":"lib/testbox/",
+        "route-visualizer":"lib/modules/route-visualizer/",
+        "cbsecurity":"lib/modules/cbsecurity/",
+        "mementifier":"lib/modules/mementifier/",
+        "cbvalidation":"lib/modules/cbvalidation/",
+        "relax":"lib/modules/relax/",
+        "cbq":"lib/modules/cbq/",
+        "qb":"lib/modules/qb/"
+    },
+    "scripts":{
+        "format":"!boxlang format --source app/,tests/specs/,*.bx",
+        "format:check":"!boxlang format --check --source app/,tests/specs/,*.bx",
+        "docker:build":"!docker build --no-cache -t my-coldbox-app -f ./docker/Dockerfile ./",
+        "docker:run":"!docker run -it -p 8080:8080 my-coldbox-app",
+        "docker:bash":"!docker run -it my-coldbox-app /bin/bash",
+        "docker:stack":"!docker compose -f docker/docker-compose.yaml ${1}"
+    },
+    "testbox":{
+        "runner":"/tests/runner.bxm"
+    },
+    "description":"A ColdBox Application created with the ColdBox CLI"
+}

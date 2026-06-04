@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__cbq__searchDocumentation",
+      "mcp__cbq__getPage",
+      "Bash(cd /f/dev/Veriti/cbq-worker 2>/dev/null; echo \"===tree top===\"; ls -1 2>/dev/null; echo \"===handlers===\"; find . -path ./node_modules -prune -o -iname \"*.cfc\" -print 2>/dev/null | grep -i \"handler\\\\|monitor\\\\|failed\\\\|udf\\\\|helper\\\\|util\\\\|service\" | grep -vi modules/ | head -40)",
+      "Read(//f/dev/Veriti/cbq-worker/**)",
+      "Bash(cd /f/dev/Veriti/cbq-worker 2>/dev/null; echo \"===failedJobs.js===\"; cat views/monitor/failedJobs.js 2>/dev/null | head -200)",
+      "Bash(cd /f/dev/Veriti/cbq-worker)",
+      "Bash(sed -n '200,400p' views/monitor/failedJobs.js)"
+    ]
+  }
+}
