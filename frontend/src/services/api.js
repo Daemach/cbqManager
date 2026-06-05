@@ -40,6 +40,9 @@ export const api = {
   updateConnection: (id, data) => request('PUT', `/connections/${id}`, { body: data }),
   deleteConnection: (id) => request('DELETE', `/connections/${id}`),
 
+  // realtime (Live Monitor) — public broadcast config for a Connection (never the secret)
+  connectionBroadcast: (cid) => request('GET', `/connections/${cid}/broadcast`),
+
   // queue health + jobs
   queueHealth: (cid) => request('GET', `/connections/${cid}/health`),
   listJobs: (cid, params) => request('GET', `/connections/${cid}/jobs`, { params }),

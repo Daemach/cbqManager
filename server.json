@@ -11,6 +11,9 @@
     },
     "web":{
         "webroot":"public",
+        "http":{
+            "port":60472
+        },
         "rewrites":{
             "enable":true
         },

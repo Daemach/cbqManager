@@ -13,8 +13,8 @@ const routes = [
       { path: 'c/:connectionId/health', name: 'health', component: () => import('@/views/QueueHealthView.vue'), props: true },
       { path: 'c/:connectionId/jobs', name: 'jobs', component: () => import('@/views/JobsView.vue'), props: true },
       { path: 'c/:connectionId/failed', name: 'failed', component: () => import('@/views/FailedJobsView.vue'), props: true },
-      { path: 'c/:connectionId/batches', name: 'batches', component: () => import('@/views/BatchesView.vue'), props: true },
-      { path: 'c/:connectionId/monitor', name: 'monitor', component: () => import('@/views/MonitorView.vue'), props: true }
+      { path: 'c/:connectionId/batches', name: 'batches', component: () => import('@/views/BatchesView.vue'), props: true }
+      // The Live Monitor is no longer a route — it is a persistent dock in MainLayout (PRD-0002).
     ]
   }
 ]

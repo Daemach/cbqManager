@@ -21,6 +21,17 @@ class extends="BaseApiHandler" {
 		event.getResponse().setData( row );
 	}
 
+	/**
+	 * Broadcast (realtime) config for a Connection — PUBLIC params only; never the secret.
+	 * Connection-scoped read (monitor.view), so scoped operators/viewers can subscribe, not just admins.
+	 * Returns { realtime, transport, channel, events, publicParams }; a Connection with no Broadcast
+	 * Connection returns a well-formed realtime:false result.
+	 */
+	function broadcast( event, rc, prc ){
+		if ( !secure( event, "monitor.view", rc.connectionId ) ) return;
+		event.getResponse().setData( registry.publicBroadcastFor( rc.connectionId ) );
+	}
+
 	function create( event, rc, prc ){
 		if ( !secure( event, "connection.create" ) ) return;
 		var id = registry.create( rc );
