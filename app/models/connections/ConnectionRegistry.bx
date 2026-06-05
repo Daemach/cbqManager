@@ -143,6 +143,44 @@ class {
 		own().from( "cbqm_broadcast_connections" ).where( "id", arguments.id ).delete();
 	}
 
+	/**
+	 * Public realtime view for a Connection — SAFE to return to a client. Resolves the Connection's
+	 * linked Broadcast Connection (if any) and exposes only the transport, Channel, events, and the
+	 * PUBLIC transport params (e.g. Pusher key/cluster). The secret NEVER leaves the server.
+	 *
+	 * A Connection with no Broadcast Connection (or an unknown link) returns a well-formed
+	 * "no realtime" result (`realtime:false`) rather than throwing — realtime is optional per PRD-0002.
+	 *
+	 * @connectionId Connection id.
+	 *
+	 * @return { realtime:boolean, transport:string, channel:string, events:array, publicParams:struct }
+	 */
+	struct function publicBroadcastFor( required numeric connectionId ){
+		var conn = get( arguments.connectionId );
+		if ( structIsEmpty( conn ) ){
+			throw( type = "cbqm.ConnectionNotFound", message = "No Connection [#arguments.connectionId#]" );
+		}
+
+		var result = {
+			"realtime"     : false,
+			"transport"    : "",
+			"channel"      : conn.channel ?: "",
+			"events"       : parseEvents( conn.events ?: "" ),
+			"publicParams" : {}
+		};
+
+		var bcId = conn.broadcastConnectionId ?: "";
+		if ( !isNumeric( bcId ) || bcId == 0 ){
+			return result; // no realtime configured — degrade gracefully
+		}
+
+		var bc = resolveBroadcast( bcId );
+		result.transport    = bc.transport ?: "";
+		result.publicParams = publicBroadcastParams( bc );
+		result.realtime     = len( result.transport ) > 0;
+		return result;
+	}
+
 	// ---- lookups (idempotent seeding / name resolution) --------------------
 
 	/**
@@ -193,6 +231,43 @@ class {
 			}
 		}
 		return row;
+	}
+
+	/**
+	 * The PUBLIC (non-secret) params a browser needs to subscribe, per transport. Reads only the
+	 * plaintext public columns — never `bc.secrets` — so the secret can never leak through here.
+	 */
+	private struct function publicBroadcastParams( required struct bc ){
+		switch ( lcase( arguments.bc.transport ?: "" ) ){
+			case "pusher":
+				return { "pusherKey" : arguments.bc.pusherKey ?: "", "pusherCluster" : arguments.bc.pusherCluster ?: "" };
+			case "socketbox":
+				return { "socketboxUrl" : arguments.bc.socketboxUrl ?: "" };
+			default:
+				return {};
+		}
+	}
+
+	/**
+	 * Normalize a Connection's stored `events` (a CSV string, or a JSON array string) into an array
+	 * of event names. Blank/absent yields an empty array.
+	 */
+	private array function parseEvents( required any events ){
+		if ( isArray( arguments.events ) ){
+			return arguments.events;
+		}
+		var raw = trim( arguments.events & "" );
+		if ( !len( raw ) ){
+			return [];
+		}
+		if ( left( raw, 1 ) == "[" ){
+			try {
+				return jsonDeserialize( raw );
+			} catch ( any e ) {
+				// fall through to CSV parsing
+			}
+		}
+		return listToArray( raw ).map( ( e ) => trim( e ) ).filter( ( e ) => len( e ) > 0 );
 	}
 
 	private function own(){

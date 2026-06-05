@@ -67,6 +67,9 @@ class {
 		get(    "/api/connections/:connectionId/health",  "QueueHealth.index" )
 		get(    "/api/connections/:connectionId/archive", "Archive.index" )
 
+		// Realtime (Live Monitor) broadcast config — PUBLIC params only, never the secret
+		get(    "/api/connections/:connectionId/broadcast", "Connections.broadcast" )
+
 		// Audit (admin)
 		get(    "/api/audit", "Audit.index" )
 

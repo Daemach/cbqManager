@@ -1,0 +1,148 @@
+/**
+ * Slice 1 — the Live Monitor broadcast config contract.
+ *
+ * Asserts EXTERNAL behavior of `ConnectionRegistry.publicBroadcastFor()` (the deep module that owns
+ * the contract) and of the secured `GET /api/connections/:connectionId/broadcast` endpoint:
+ *   - returns transport, channel, events, and PUBLIC transport params;
+ *   - NEVER leaks the secret (the encrypted blob or the decrypted pusherSecret);
+ *   - a Connection with no Broadcast Connection degrades to a well-formed realtime:false result.
+ */
+@autowire
+class extends="coldbox.system.testing.BaseTestCase" {
+
+	@inject( "ConnectionRegistry" )
+	property name="registry";
+
+	@inject( "provider:JwtService@cbsecurity" )
+	property name="jwtService";
+
+	@inject( "provider:authenticationService@cbauth" )
+	property name="cbauth";
+
+	function beforeAll(){ super.beforeAll(); }
+	function afterAll(){ super.afterAll(); }
+
+	function run(){
+		describe( "Broadcast config (Live Monitor) contract", () => {
+
+			beforeEach( ( currentSpec ) => {
+				setup();
+				cbauth.logout();
+				jwtService.getTokenStorage().clearAll();
+			} );
+
+			it( "publicBroadcastFor returns transport/channel/events + PUBLIC params, never the secret", () => {
+				var secret = "shh-#getTickCount()#";
+				var bcId   = registry.createBroadcast( {
+					"name"          : "TEST_BC_BCAST_" & getTickCount(),
+					"transport"     : "pusher",
+					"pusherKey"     : "pk_public_abc",
+					"pusherCluster" : "us2",
+					"secrets"       : { "pusherAppId" : "appid-123", "pusherSecret" : secret }
+				} );
+				var connId = registry.create( {
+					"name"                  : "TEST_CONN_BCAST_" & getTickCount(),
+					"environment"           : "development",
+					"grammar"               : "mssql",
+					"datasourceClass"       : "com.microsoft.sqlserver.jdbc.SQLServerDriver",
+					"connectionString"      : "jdbc:sqlserver://localhost:1433;databaseName=X",
+					"secrets"               : { "username" : "sa", "password" : "p" },
+					"broadcastConnectionId" : bcId,
+					"channel"               : "development",
+					"events"                : "cbqWorker,cbqWorkerError"
+				} );
+
+				try {
+					var pub = registry.publicBroadcastFor( connId );
+
+					expect( pub.realtime ).toBeTrue();
+					expect( pub.transport ).toBe( "pusher" );
+					expect( pub.channel ).toBe( "development" );
+					// events CSV is parsed into an array
+					expect( pub.events ).toBeArray();
+					expect( pub.events ).toHaveLength( 2 );
+					expect( pub.events[ 1 ] ).toBe( "cbqWorker" );
+					// public params only
+					expect( pub.publicParams.pusherKey ).toBe( "pk_public_abc" );
+					expect( pub.publicParams.pusherCluster ).toBe( "us2" );
+					expect( pub.publicParams ).notToHaveKey( "pusherSecret" );
+					expect( pub.publicParams ).notToHaveKey( "pusherAppId" );
+					// the whole structure carries no secret or encrypted blob anywhere
+					expect( pub ).notToHaveKey( "secrets" );
+					expect( pub ).notToHaveKey( "secrets_enc" );
+					expect( jsonSerialize( pub ) ).notToInclude( secret );
+					expect( jsonSerialize( pub ) ).notToInclude( "appid-123" );
+				} finally {
+					registry.remove( connId );
+					registry.removeBroadcast( bcId );
+				}
+			} );
+
+			it( "degrades to a well-formed realtime:false result when no Broadcast Connection is linked", () => {
+				var connId = registry.create( {
+					"name"             : "TEST_CONN_NORT_" & getTickCount(),
+					"environment"      : "development",
+					"grammar"          : "mssql",
+					"datasourceClass"  : "com.microsoft.sqlserver.jdbc.SQLServerDriver",
+					"connectionString" : "jdbc:sqlserver://localhost:1433;databaseName=X",
+					"secrets"          : { "username" : "sa", "password" : "p" }
+				} );
+				try {
+					var pub = registry.publicBroadcastFor( connId );
+					expect( pub.realtime ).toBeFalse();
+					expect( pub.transport ).toBe( "" );
+					expect( pub.publicParams ).toBeEmpty();
+					expect( pub.events ).toBeArray();
+					expect( pub.events ).toBeEmpty();
+				} finally {
+					registry.remove( connId );
+				}
+			} );
+
+			it( "GET /api/connections/:id/broadcast returns the public config and never the secret", () => {
+				var secret = "endpoint-secret-#getTickCount()#";
+				var bcId   = registry.createBroadcast( {
+					"name"          : "TEST_BC_EP_" & getTickCount(),
+					"transport"     : "pusher",
+					"pusherKey"     : "pk_endpoint",
+					"pusherCluster" : "eu",
+					"secrets"       : { "pusherAppId" : "ep-app", "pusherSecret" : secret }
+				} );
+				var connId = registry.create( {
+					"name"                  : "TEST_CONN_EP_" & getTickCount(),
+					"environment"           : "development",
+					"grammar"               : "mssql",
+					"datasourceClass"       : "com.microsoft.sqlserver.jdbc.SQLServerDriver",
+					"connectionString"      : "jdbc:sqlserver://localhost:1433;databaseName=X",
+					"secrets"               : { "username" : "sa", "password" : "p" },
+					"broadcastConnectionId" : bcId,
+					"channel"               : "production",
+					"events"                : "cbqWorker"
+				} );
+
+				try {
+					var token = jwtService.attempt( "admin", "password" );
+					var event = this.get(
+						route  = "/api/connections/#connId#/broadcast",
+						params = { "x-auth-token" : token }
+					);
+					var response = event.getPrivateValue( "Response" );
+
+					expect( response.getError() ).toBeFalse( response.getMessages().toString() );
+					var data = response.getData();
+					expect( data.realtime ).toBeTrue();
+					expect( data.transport ).toBe( "pusher" );
+					expect( data.channel ).toBe( "production" );
+					expect( data.publicParams.pusherKey ).toBe( "pk_endpoint" );
+					// the serialized HTTP response body must not contain the secret
+					expect( jsonSerialize( response.getData() ) ).notToInclude( secret );
+				} finally {
+					registry.remove( connId );
+					registry.removeBroadcast( bcId );
+				}
+			} );
+
+		} );
+	}
+
+}
