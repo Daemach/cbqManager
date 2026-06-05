@@ -1,0 +1,78 @@
+/**
+ * DevFixtureSeeder — idempotently seeds the local development fixture from .env: a Pusher
+ * Broadcast Connection and a LINKED FTDIQueue Connection. The database Connection and its
+ * websocket Broadcast Connection are a paired unit — the Connection always references the
+ * broadcast + channel + events. Secrets are encrypted via ConnectionRegistry (CredentialCipher).
+ *
+ * Dev-only. Safe to run repeatedly: existing records (matched by unique name) are left in place,
+ * and a pre-existing-but-unlinked Connection is repaired to carry the pairing.
+ */
+@singleton
+class {
+
+	property name="registry" inject="ConnectionRegistry";
+
+	/**
+	 * Seed (or repair) the dev fixture.
+	 *
+	 * @return struct { broadcastId, connectionId, created:{ broadcast, connection } }
+	 */
+	struct function seed(){
+		var summary = { "created" : { "broadcast" : false, "connection" : false } };
+
+		// 1) Broadcast Connection (Pusher): public key/cluster plaintext, appId/secret encrypted.
+		var bc = registry.findBroadcastByName( "Development Pusher" );
+		if ( structIsEmpty( bc ) ){
+			summary[ "broadcastId" ] = registry.createBroadcast( {
+				"name"          : "Development Pusher",
+				"transport"     : "pusher",
+				"pusherKey"     : getSystemSetting( "PUSHER_KEY", "" ),
+				"pusherCluster" : getSystemSetting( "PUSHER_CLUSTER", "" ),
+				"secrets"       : {
+					"pusherAppId"  : getSystemSetting( "PUSHER_APPID", "" ),
+					"pusherSecret" : getSystemSetting( "PUSHER_APISECRET", "" )
+				}
+			} );
+			summary.created.broadcast = true;
+		} else {
+			summary[ "broadcastId" ] = bc.id;
+		}
+
+		// 2) FTDIQueue Connection (SQL Server) — LINKED to the broadcast (paired unit).
+		var conn = registry.findByName( "FTDIQueue" );
+		if ( structIsEmpty( conn ) ){
+			var host = getSystemSetting( "FTDI_QUEUE_DB_HOST", "" );
+			var db   = getSystemSetting( "FTDI_QUEUE_DB_DATASOURCE_NAME", "FTDIQueue" );
+			summary[ "connectionId" ] = registry.create( {
+				"name"                  : "FTDIQueue",
+				"environment"           : "development",
+				"grammar"               : "mssql",
+				"tableName"             : "cbq_jobs",
+				"datasourceClass"       : "com.microsoft.sqlserver.jdbc.SQLServerDriver",
+				"connectionString"      : "jdbc:sqlserver://#host#:1433;databaseName=#db#;trustServerCertificate=true",
+				"secrets"               : {
+					"username" : getSystemSetting( "FTDI_QUEUE_DB_USER", "" ),
+					"password" : getSystemSetting( "FTDI_QUEUE_DB_PASSWORD", "" )
+				},
+				// realtime pairing — database + websocket work together
+				"broadcastConnectionId" : summary.broadcastId,
+				"channel"               : getSystemSetting( "PUSHER_CHANNEL", "development" ),
+				"events"                : "cbqWorker,cbqWorkerError"
+			} );
+			summary.created.connection = true;
+		} else {
+			summary[ "connectionId" ] = conn.id;
+			// Repair the pairing if a Connection pre-existed without its broadcast link.
+			if ( !len( conn.broadcastConnectionId ?: "" ) ){
+				registry.update( conn.id, {
+					"broadcastConnectionId" : summary.broadcastId,
+					"channel"               : getSystemSetting( "PUSHER_CHANNEL", "development" ),
+					"events"                : "cbqWorker,cbqWorkerError"
+				} );
+			}
+		}
+
+		return summary;
+	}
+
+}

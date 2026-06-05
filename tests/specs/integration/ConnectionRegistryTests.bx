@@ -1,0 +1,119 @@
+/**
+ * Phase 1 — ConnectionRegistry broadcast CRUD, encrypted credential round-trips, the generic
+ * datasource shape, and the idempotent/linked dev fixture seeder.
+ *
+ * These assert EXTERNAL behavior (what goes in encrypted comes back decrypted; the pairing is
+ * present; seeding twice does not duplicate) — not how the SQL is built. The live-DB case is
+ * opt-in (RUN_LIVE=true) since it needs the real SQL Server target reachable.
+ */
+@autowire
+class extends="coldbox.system.testing.BaseTestCase" {
+
+	@inject( "ConnectionRegistry" )
+	property name="registry";
+
+	@inject( "DevFixtureSeeder" )
+	property name="seeder";
+
+	@inject( "QueryBuilderFactory" )
+	property name="qbFactory";
+
+	function beforeAll(){ super.beforeAll(); }
+	function afterAll(){ super.afterAll(); }
+
+	function run(){
+		describe( "ConnectionRegistry & dev fixture (Phase 1)", () => {
+
+			beforeEach( ( currentSpec ) => {
+				// New ColdBox request per spec.
+				setup();
+			} );
+
+			it( "createBroadcast encrypts secrets and resolveBroadcast round-trips them", () => {
+				var bcName = "TEST_BC_" & getTickCount();
+				var id     = registry.createBroadcast( {
+					"name"          : bcName,
+					"transport"     : "pusher",
+					"pusherKey"     : "pk_public",
+					"pusherCluster" : "us2",
+					"secrets"       : { "pusherAppId" : "appid-123", "pusherSecret" : "shh-secret" }
+				} );
+				expect( id ).toBeNumeric();
+				expect( id ).notToBe( 0 );
+				try {
+					var resolved = registry.resolveBroadcast( id );
+					// Secrets decrypt back to the originals.
+					expect( resolved.secrets.pusherSecret ).toBe( "shh-secret" );
+					expect( resolved.secrets.pusherAppId ).toBe( "appid-123" );
+					// Public fields stay plaintext and queryable.
+					expect( resolved.pusherKey ).toBe( "pk_public" );
+					// The stored blob is non-empty and does NOT contain the plaintext secret.
+					var raw = qbFactory.forOwnStore().from( "cbqm_broadcast_connections" ).where( "id", id ).first();
+					expect( len( raw.secrets_enc ) ).toBeGT( 0 );
+					expect( raw.secrets_enc ).notToInclude( "shh-secret" );
+				} finally {
+					registry.removeBroadcast( id );
+				}
+			} );
+
+			it( "create + resolve a Connection decrypts the datasource using the generic driver", () => {
+				var bcId = registry.createBroadcast( { "name" : "TEST_BC2_" & getTickCount(), "transport" : "pusher", "secrets" : {} } );
+				var id   = registry.create( {
+					"name"                  : "TEST_CONN_" & getTickCount(),
+					"environment"           : "development",
+					"grammar"               : "mssql",
+					"datasourceClass"       : "com.microsoft.sqlserver.jdbc.SQLServerDriver",
+					"connectionString"      : "jdbc:sqlserver://localhost:1433;databaseName=X;trustServerCertificate=true",
+					"secrets"               : { "username" : "sa", "password" : "p@ssw0rd" },
+					"broadcastConnectionId" : bcId,
+					"channel"               : "development",
+					"events"                : "cbqWorker,cbqWorkerError"
+				} );
+				try {
+					var resolved = registry.resolve( id );
+					expect( resolved.datasource.driver ).toBe( "generic" );
+					expect( resolved.datasource.class ).toBe( "com.microsoft.sqlserver.jdbc.SQLServerDriver" );
+					expect( resolved.datasource.username ).toBe( "sa" );
+					expect( resolved.datasource.password ).toBe( "p@ssw0rd" );
+					// Paired: the Connection carries its broadcast link.
+					expect( resolved.broadcastConnectionId ).toBe( bcId );
+				} finally {
+					registry.remove( id );
+					registry.removeBroadcast( bcId );
+				}
+			} );
+
+			it( "the dev fixture seeder is idempotent and links the database/websocket pair", () => {
+				// The fixture is seeded on app init; running it again must not duplicate.
+				var before  = registry.list().len();
+				var summary = seeder.seed();
+				var after   = registry.list().len();
+				expect( after ).toBe( before, "re-seeding must not create duplicate Connections" );
+
+				var conn = registry.findByName( "FTDIQueue" );
+				expect( conn ).notToBeEmpty( "FTDIQueue must exist after seeding" );
+				expect( conn.broadcastConnectionId ).notToBeEmpty( "Connection must be linked to a Broadcast (paired)" );
+				expect( conn.broadcastConnectionId ).toBe( summary.broadcastId );
+			} );
+
+			it(
+				title = "connects to the live FTDIQueue and reads cbq_jobs",
+				skip  = !runLive(),
+				body  = () => {
+					var conn     = registry.findByName( "FTDIQueue" );
+					expect( conn ).notToBeEmpty( "FTDIQueue must be seeded" );
+					var resolved = registry.resolve( conn.id );
+					var qb       = qbFactory.forConnection( resolved );
+					var n        = qb.from( "cbq_jobs" ).count();
+					expect( n ).toBeGT( 0, "live cbq_jobs should return rows" );
+				}
+			);
+
+		} );
+	}
+
+	private boolean function runLive(){
+		return getSystemSetting( "RUN_LIVE", "false" ) == "true";
+	}
+
+}

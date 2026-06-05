@@ -13,6 +13,31 @@ class extends="coldbox.system.EventHandler" {
 
 	function onAppInit( event, rc, prc ){
 		seedDefaultAdmin();
+		seedDevFixture();
+	}
+
+	/**
+	 * In development, idempotently seed the local dev fixture from .env: a Pusher Broadcast
+	 * Connection and a LINKED FTDIQueue Connection (database + websocket as a paired unit), so the
+	 * deeper views run against live data without manual setup. Failures are logged, never fatal.
+	 */
+	private function seedDevFixture(){
+		if ( getSetting( "environment" ) != "development" ){
+			return;
+		}
+		try {
+			var summary = getInstance( "DevFixtureSeeder" ).seed();
+			if ( summary.created.broadcast || summary.created.connection ){
+				log.info( "Seeded dev fixture (broadcast ##summary.broadcastId##, connection ##summary.connectionId##)" );
+			}
+		} catch ( any e ){
+			savecontent variable="local.dumpOut" {
+				writeDump( var = e, format = "text" );
+			}
+			var logPath = getCanonicalPath( getController().getAppRootPath() & "/../runtime/logs/devfixture-error.log" );
+			fileWrite( logPath, local.dumpOut );
+			log.error( "Dev fixture seed failed: #e.message#", e );
+		}
 	}
 
 	/**

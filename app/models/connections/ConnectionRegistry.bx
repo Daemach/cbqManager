@@ -82,6 +82,10 @@ class {
 			? cipher.decryptStruct( row.secrets_enc, row.cipherIv, row.cipherAlg )
 			: {};
 		row[ "datasource" ] = {
+			// `generic` tells BoxLang to use the supplied JDBC driver class + connection string
+			// directly (verified against the live SQL Server target). The driver jar (e.g. bx-mssql)
+			// must be loaded by the runtime for `class` to resolve.
+			"driver"           : "generic",
 			"class"            : row.datasourceClass,
 			"connectionString" : row.connectionString,
 			"username"         : secrets.username ?: "",
@@ -103,7 +107,59 @@ class {
 			.get();
 	}
 
-	// TODO: createBroadcast / updateBroadcast / resolveBroadcast mirroring the Connection methods.
+	/**
+	 * Create a Broadcast Connection. Expects `secrets` = { pusherAppId, pusherSecret } or
+	 * { socketboxAuth }; the rest are columns. Mirrors create(): secrets are encrypted as one blob.
+	 *
+	 * @return the new id.
+	 */
+	numeric function createBroadcast( required struct data ){
+		var row = sanitizeBroadcast( arguments.data );
+		var env = cipher.encryptStruct( arguments.data.secrets ?: {} );
+		row[ "secrets_enc" ] = env.value;
+		row[ "cipherIv" ]    = env.iv;
+		row[ "cipherAlg" ]   = env.alg;
+		row[ "createdDate" ] = clock.nowUtc();
+		var result = own().from( "cbqm_broadcast_connections" ).insert( row );
+		return result.result.generatedKey ?: 0;
+	}
+
+	/**
+	 * Resolve a Broadcast Connection to its config WITH decrypted secrets under `secrets`.
+	 * INTERNAL ONLY — never return this to a client (the public keys are safe; the secret is not).
+	 */
+	struct function resolveBroadcast( required numeric id ){
+		var row = own().from( "cbqm_broadcast_connections" ).where( "id", arguments.id ).first();
+		if ( isNull( row ) || structIsEmpty( row ) ){
+			throw( type = "cbqm.BroadcastNotFound", message = "No Broadcast Connection [#arguments.id#]" );
+		}
+		row[ "secrets" ] = len( row.secrets_enc ?: "" )
+			? cipher.decryptStruct( row.secrets_enc, row.cipherIv, row.cipherAlg )
+			: {};
+		return row;
+	}
+
+	void function removeBroadcast( required numeric id ){
+		own().from( "cbqm_broadcast_connections" ).where( "id", arguments.id ).delete();
+	}
+
+	// ---- lookups (idempotent seeding / name resolution) --------------------
+
+	/**
+	 * Find a Connection's stored row by unique name, or {} if none.
+	 */
+	struct function findByName( required string name ){
+		var row = own().from( "cbqm_connections" ).where( "name", arguments.name ).first();
+		return isNull( row ) ? {} : row;
+	}
+
+	/**
+	 * Find a Broadcast Connection's stored row by unique name, or {} if none.
+	 */
+	struct function findBroadcastByName( required string name ){
+		var row = own().from( "cbqm_broadcast_connections" ).where( "name", arguments.name ).first();
+		return isNull( row ) ? {} : row;
+	}
 
 	// ---- helpers -----------------------------------------------------------
 
@@ -120,6 +176,20 @@ class {
 		for ( var k in allowed ){
 			if ( structKeyExists( arguments.data, k ) ){
 				row[ k ] = isArray( arguments.data[ k ] ) ? jsonSerialize( arguments.data[ k ] ) : arguments.data[ k ];
+			}
+		}
+		return row;
+	}
+
+	/**
+	 * Strip non-column / secret keys before a Broadcast Connection write.
+	 */
+	private struct function sanitizeBroadcast( required struct data ){
+		var allowed = [ "name", "transport", "pusherKey", "pusherCluster", "socketboxUrl" ];
+		var row = {};
+		for ( var k in allowed ){
+			if ( structKeyExists( arguments.data, k ) ){
+				row[ k ] = arguments.data[ k ];
 			}
 		}
 		return row;

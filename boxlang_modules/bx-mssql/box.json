@@ -1,0 +1,47 @@
+{
+	"name": "BoxLang Microsoft SQL Server",
+	"version": "1.6.0+13",
+	"location": "https://downloads.ortussolutions.com/ortussolutions/boxlang-modules/bx-mssql/1.6.0/bx-mssql-1.6.0.zip",
+	"author": "Ortus Solutions",
+	"homepage": "https://github.com/ortus-boxlang/bx-mssql",
+	"documentation": "https://github.com/ortus-boxlang/bx-mssql",
+	"repository": {
+		"type": "git",
+		"URL": "https://github.com/ortus-boxlang/bx-mssql"
+	},
+	"bugs": "https://github.com/ortus-boxlang/bx-mssql/issues",
+	"slug": "bx-mssql",
+	"shortDescription": "Microsoft SQL Server JDBC Support for BoxLang",
+	"type": "boxlang-modules",
+	"keywords": [
+		"boxlang"
+	],
+	"boxlang": {
+		"minimumVersion": "1.0.0",
+		"moduleName": "mssql"
+	},
+	"private": false,
+	"license": [
+		{
+			"type": "Apache-2.0",
+			"URL": "https://www.apache.org/licenses/LICENSE-2.0"
+		}
+	],
+	"devDependencies": {
+		"commandbox-cfformat": "*",
+		"commandbox-docbox": "*",
+		"testbox": "*"
+	},
+	"ignore": [
+		"**/.*",
+		"settings.gradle",
+		"gradlew.bat",
+		"gradlew",
+		"build.gradle",
+		"/src/**",
+		"gradle/**"
+	],
+	"scripts": {
+		"start:db": "docker-compose up -d"
+	}
+}
