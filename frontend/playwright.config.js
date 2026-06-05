@@ -17,7 +17,11 @@ export default defineConfig({
   outputDir: './test-results',
   timeout: 30_000,
   expect: { timeout: 10_000 },
-  fullyParallel: true,
+  // cbqManager's own store is SQLite (single writer). Specs that create/delete Connections in
+  // parallel hit SQLITE_BUSY, so run one worker — the suite is small and stays deterministic.
+  // (Follow-up: a busy_timeout/WAL on the own-store datasource would let this go parallel again.)
+  fullyParallel: false,
+  workers: 1,
   reporter: [
     [ 'list' ],
     [ 'junit', { outputFile: '../tests/results/playwright-junit.xml' } ],

@@ -5,15 +5,19 @@
         <q-btn flat dense round icon="menu" @click="drawer = !drawer" />
         <q-toolbar-title>cbqManager</q-toolbar-title>
         <q-select
-          v-model="connectionId"
+          v-model="pickerValue"
           :options="connectionOptions"
           dense outlined emit-value map-options dark
-          label="Connection"
+          label="Open a Connection"
           style="min-width: 220px"
-          @update:model-value="onConnectionChange"
+          data-test="connection-picker"
+          @update:model-value="onPick"
         />
         <q-btn flat dense icon="logout" class="q-ml-sm" @click="onLogout" />
       </q-toolbar>
+
+      <!-- Top zone: Connection context tabs — the primary context switcher (PRD-0002). -->
+      <ConnectionTabs />
     </q-header>
 
     <q-drawer v-model="drawer" show-if-above bordered>
@@ -25,9 +29,10 @@
         </q-item>
 
         <q-separator class="q-my-sm" />
-        <q-item-label header>Selected Connection</q-item-label>
-        <q-item v-for="t in tools" :key="t.name" clickable :disable="!connectionId"
-                :to="connectionId ? { name: t.name, params: { connectionId } } : undefined">
+        <q-item-label header>Active Connection</q-item-label>
+        <q-item v-for="t in tools" :key="t.name" clickable :disable="!activeId"
+                :data-test="`tool-${t.name}`"
+                :to="activeId ? { name: t.name, params: { connectionId: activeId } } : undefined">
           <q-item-section avatar><q-icon :name="t.icon" /></q-item-section>
           <q-item-section>{{ t.label }}</q-item-section>
         </q-item>
@@ -38,8 +43,8 @@
       <router-view />
     </q-page-container>
 
-    <!-- Persistent Live Monitor dock — mounted OUTSIDE <router-view> so the live feed and its
-         history survive navigation between tools (PRD-0002 keystone). -->
+    <!-- Persistent Live Monitor dock — mounted OUTSIDE <router-view> so the feed survives
+         navigation and swaps atomically with the active context (PRD-0002). -->
     <q-footer>
       <MonitorDock />
     </q-footer>
@@ -47,19 +52,25 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { api, setToken } from '@/services/api'
 import { useRealtimeStore } from '@/stores/realtime'
+import { useConnectionContextStore } from '@/stores/connectionContext'
 import MonitorDock from '@/components/MonitorDock.vue'
+import ConnectionTabs from '@/components/ConnectionTabs.vue'
 
 const router = useRouter()
 const route = useRoute()
 const realtime = useRealtimeStore()
+const ctx = useConnectionContextStore()
 
 const drawer = ref(true)
-const connectionId = ref(null)
+const pickerValue = ref(null)
 const connectionOptions = ref([])
+const connById = ref({})
+
+const activeId = computed(() => ctx.activeId)
 
 const tools = [
   { name: 'health', label: 'Queue Health', icon: 'monitor_heart' },
@@ -68,34 +79,61 @@ const tools = [
   { name: 'batches', label: 'Batches', icon: 'layers' }
 ]
 
-// The active realtime context follows the routed Connection. The dock (in the footer) reads the
-// active context from the store, so switching tools keeps the same stream; switching Connections
-// swaps it atomically.
-watch(() => route.params.connectionId, (cid) => {
-  if (cid != null && cid !== '') {
-    connectionId.value = cid
-    realtime.setActive(cid)
-  } else {
-    realtime.setActive(null)
-  }
+// Picker → open (or focus) a Connection tab; clear the picker so it reads as an action, not a value.
+function onPick(id) {
+  if (id == null) return
+  const conn = connById.value[String(id)] || { id }
+  ctx.openTab(conn)
+  pickerValue.value = null
+}
+
+// The routed Connection drives which tab is open/active and what tool it remembers (covers deep
+// links and drawer-tool navigation). Opening sets it active; the activeId watcher handles the rest.
+watch(() => [ route.params.connectionId, route.name ], ([ cid, name ]) => {
+  if (cid == null || cid === '') return
+  const id = String(cid)
+  if (!ctx.isOpen(id)) ctx.openTab(connById.value[id] || { id })
+  else ctx.activateTab(id)
+  if (name) ctx.rememberTool(id, name) // also fires on tool-to-tool nav within the same Connection
 }, { immediate: true })
+
+// Active context changes → swap the dock's stream and navigate to the tab's remembered tool, but
+// only when we're not already on that context's route (so deep links don't bounce).
+watch(activeId, (id) => {
+  realtime.setActive(id ?? null)
+  if (id == null) return
+  const tab = ctx.activeTab
+  if (tab && String(route.params.connectionId) !== String(id)) {
+    router.push({ name: tab.lastTool, params: { connectionId: id } })
+  }
+})
+
+// Keep every open tab subscribed so backgrounded contexts keep streaming (and badging).
+watch(() => ctx.tabs.map((t) => t.connectionId).join(','), () => {
+  ctx.tabs.forEach((t) => realtime.subscribe(t.connectionId))
+})
 
 async function loadConnections() {
   const res = await api.listConnections().catch(() => ({ data: [] }))
-  connectionOptions.value = (res.data || []).map((c) => ({ label: `${c.name} (${c.environment || '—'})`, value: c.id }))
+  const list = res.data || []
+  connById.value = Object.fromEntries(list.map((c) => [ String(c.id), c ]))
+  connectionOptions.value = list.map((c) => ({ label: `${c.name} (${c.environment || '—'})`, value: c.id }))
+  // Backfill names for any tab opened before the list loaded (e.g. a deep link).
+  ctx.tabs.forEach((t) => {
+    const c = connById.value[t.connectionId]
+    if (c) t.name = c.name
+  })
 }
-function onConnectionChange(id) {
-  if (id) router.push({ name: 'health', params: { connectionId: id } })
-}
+
 function onLogout() {
   api.logout().finally(() => { setToken(''); router.push({ name: 'login' }) })
 }
 
 onMounted(loadConnections)
 
-// Dev/e2e seam: lets Playwright inject synthetic Worker activity deterministically without
-// depending on live Pusher traffic. Guarded to dev builds only.
+// Dev/e2e seam: lets Playwright inject synthetic Worker activity deterministically.
 if (import.meta.env.DEV) {
   window.__cbqmRealtime = realtime
+  window.__cbqmContext = ctx
 }
 </script>
