@@ -1,0 +1,95 @@
+/**
+ * BatchRepository — reads cbq_batches and performs batch control: cancel (stamp cancelledDate),
+ * delete, retry-failed, and drill-down to live Jobs via the payload `$.batchId` (PRD batches).
+ */
+@singleton
+class {
+
+	property name="qbFactory" inject="QueryBuilderFactory";
+	property name="registry"  inject="ConnectionRegistry";
+	property name="failedRepo" inject="FailedJobRepository";
+	property name="clock"     inject="Clock";
+
+	variables.BATCHES = "cbq_batches";
+
+	/**
+	 * Paginated list of Batches with progress fields.
+	 */
+	struct function list( required numeric connectionId, numeric page = 1, numeric maxRows = 25 ){
+		var conn = registry.resolve( arguments.connectionId );
+		return builder( conn ).from( variables.BATCHES ).orderBy( "createdDate", "desc" ).paginate( arguments.page, arguments.maxRows );
+	}
+
+	/**
+	 * Cancel a Batch: stamp cancelledDate (Workers then skip its Jobs) AND remove its non-in-flight
+	 * pending Jobs to reclaim Worker capacity immediately. Returns rows removed from cbq_jobs.
+	 */
+	numeric function cancel( required numeric connectionId, required string batchId ){
+		var conn = registry.resolve( arguments.connectionId );
+		var now  = clock.epoch();
+
+		builder( conn ).from( variables.BATCHES )
+			.where( "id", arguments.batchId )
+			.whereNull( "cancelledDate" ).whereNull( "completedDate" )
+			.update( { "cancelledDate" : now } );
+
+		return removeBatchJobs( conn, arguments.batchId, now );
+	}
+
+	numeric function deleteBatch( required numeric connectionId, required string batchId ){
+		var conn = registry.resolve( arguments.connectionId );
+		var r = builder( conn ).from( variables.BATCHES ).where( "id", arguments.batchId ).delete();
+		return ( isStruct( r ) && structKeyExists( r, "result" ) ) ? ( r.result.recordCount ?: 0 ) : 0;
+	}
+
+	/**
+	 * Retry all of a Batch's Failed Jobs (from its failedJobIds list) via the Memento path.
+	 *
+	 * @return count of jobs re-queued.
+	 */
+	numeric function retryFailed( required numeric connectionId, required string batchId ){
+		var conn  = registry.resolve( arguments.connectionId );
+		var batch = builder( conn ).from( variables.BATCHES ).where( "id", arguments.batchId ).first();
+		if ( isNull( batch ) || !len( batch.failedJobIds ?: "" ) || !isJSON( batch.failedJobIds ) ){
+			return 0;
+		}
+		var ids = jsonDeserialize( batch.failedJobIds );
+		var requeued = 0;
+		for ( var fid in ids ){
+			requeued += failedRepo.retry( arguments.connectionId, fid, false );
+		}
+		return requeued;
+	}
+
+	/**
+	 * Drill into a Batch's live Jobs via the payload batchId.
+	 * TODO: JSON extraction is grammar-specific; this uses a SQL Server / MySQL style JSON_VALUE.
+	 *       Provide per-grammar variants (Postgres ->>, etc.) or fall back to a LIKE scan.
+	 */
+	array function drilldown( required numeric connectionId, required string batchId ){
+		var conn = registry.resolve( arguments.connectionId );
+		return builder( conn ).from( conn.tableName )
+			.whereRaw( "JSON_VALUE(CAST(payload AS NVARCHAR(MAX)), '$.batchId') = ?", [ arguments.batchId ] )
+			.whereNull( "completedDate" ).whereNull( "failedDate" )
+			.orderBy( "id" )
+			.get();
+	}
+
+	/**
+	 * Remove a Batch's non-in-flight pending Jobs (guarded; leaves genuinely in-flight rows).
+	 * TODO: grammar-portable JSON extraction (see drilldown()).
+	 */
+	private numeric function removeBatchJobs( required struct conn, required string batchId, required numeric now ){
+		var r = builder( arguments.conn ).from( arguments.conn.tableName )
+			.whereRaw( "JSON_VALUE(CAST(payload AS NVARCHAR(MAX)), '$.batchId') = ?", [ arguments.batchId ] )
+			.whereNull( "completedDate" ).whereNull( "failedDate" )
+			.where( ( g ) => g.whereNull( "reservedDate" ).orWhere( "availableDate", "<=", arguments.now ) )
+			.delete();
+		return ( isStruct( r ) && structKeyExists( r, "result" ) ) ? ( r.result.recordCount ?: 0 ) : 0;
+	}
+
+	private function builder( required struct conn ){
+		return variables.qbFactory.forConnection( arguments.conn );
+	}
+
+}

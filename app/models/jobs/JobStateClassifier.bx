@@ -1,0 +1,77 @@
+/**
+ * JobStateClassifier — pure: maps a cbq_jobs row + current epoch to a Job State.
+ *
+ * The state taxonomy mirrors the validated stuck-job toolkit buckets (CONTEXT.md "Job State",
+ * "Orphan", "Queue Health"). No I/O — trivially testable across boundary times.
+ */
+@singleton
+class {
+
+	variables.states = {
+		"COMPLETED"         : "completed",
+		"FAILED"            : "failed",
+		"IN_FLIGHT"         : "inFlight",          // reserved, genuinely held by a live worker
+		"RESERVED_TIMEDOUT" : "reservedTimedout",  // reserved but re-grabbable (pickable)
+		"ORPHAN"            : "orphan",             // reservedBy set, reservedDate null, due — un-lockable blocker
+		"AVAILABLE"         : "available",          // fresh & due
+		"SCHEDULED"         : "scheduled"           // delayed into the future
+	};
+
+	/**
+	 * The state constants map.
+	 */
+	struct function states(){
+		return variables.states;
+	}
+
+	/**
+	 * Classify a single row.
+	 *
+	 * @row An object/struct with completedDate, failedDate, reservedDate, reservedBy, availableDate.
+	 * @now Current unix epoch (seconds).
+	 */
+	string function classify( required struct row, required numeric now ){
+		var r = arguments.row;
+
+		if ( hasDate( r, "completedDate" ) ) return variables.states.COMPLETED;
+		if ( hasDate( r, "failedDate" ) )    return variables.states.FAILED;
+
+		var reserved   = hasDate( r, "reservedDate" );
+		var reservedBy = hasStr( r, "reservedBy" );
+		var available  = numericOr( r, "availableDate", 0 );
+
+		if ( reserved && available >  arguments.now ) return variables.states.IN_FLIGHT;
+		if ( reserved && available <= arguments.now ) return variables.states.RESERVED_TIMEDOUT;
+		if ( !reserved && reservedBy && available <= arguments.now ) return variables.states.ORPHAN;
+		if ( !reserved && !reservedBy && available <= arguments.now ) return variables.states.AVAILABLE;
+		return variables.states.SCHEDULED;
+	}
+
+	/**
+	 * Whether a control action may target a row in this state without first warning the operator.
+	 * Reserved/in-flight rows are NOT freely controllable (Q10 safety posture).
+	 */
+	boolean function isFreelyControllable( required string state ){
+		return !listFindNoCase( "#variables.states.IN_FLIGHT#,#variables.states.RESERVED_TIMEDOUT#", arguments.state );
+	}
+
+	private boolean function hasDate( required struct r, required string k ){
+		return structKeyExists( arguments.r, arguments.k )
+			&& !isNull( arguments.r[ arguments.k ] )
+			&& isNumeric( arguments.r[ arguments.k ] )
+			&& arguments.r[ arguments.k ] > 0;
+	}
+
+	private boolean function hasStr( required struct r, required string k ){
+		return structKeyExists( arguments.r, arguments.k )
+			&& !isNull( arguments.r[ arguments.k ] )
+			&& len( trim( toString( arguments.r[ arguments.k ] ) ) ) > 0;
+	}
+
+	private numeric function numericOr( required struct r, required string k, required numeric fallback ){
+		return ( structKeyExists( arguments.r, arguments.k ) && !isNull( arguments.r[ arguments.k ] ) && isNumeric( arguments.r[ arguments.k ] ) )
+			? arguments.r[ arguments.k ]
+			: arguments.fallback;
+	}
+
+}

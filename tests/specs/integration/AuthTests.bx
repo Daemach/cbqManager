@@ -36,7 +36,7 @@ class extends="coldbox.system.testing.BaseTestCase" {
 						// Use a user in the seeded db
 						var event = this.post(
 							route  = "/api/login",
-							params = { username : "admin", password : "admin" }
+							params = { username : "admin", password : "password" }
 						);
 						var response = event.getPrivateValue( "Response" );
 						expect( response.getError() ).toBeFalse( response.getMessages().toString() );
@@ -65,13 +65,14 @@ class extends="coldbox.system.testing.BaseTestCase" {
 			story( "I want to register into the system", () => {
 				given( "valid registration details", () => {
 					then( "I should register, log in and get a token", () => {
-						// Use a user in the seeded db
+						// Unique username keeps reruns isolated (persisted to the real own store)
+						var uname = "loop-#createUUID()#@test.local";
 						var event = this.post(
 							route  = "/api/register",
 							params = {
 								firstName : "luis",
 								lastName  : "majano",
-								username  : "lmajano@coldbox.org",
+								username  : uname,
 								password  : "lmajano"
 							}
 						);
@@ -79,11 +80,15 @@ class extends="coldbox.system.testing.BaseTestCase" {
 						expect( response.getError() ).toBeFalse( response.getMessages().toString() );
 						expect( response.getData() ).toHaveKey( "token,user" );
 
-						// debug( response.getData() );
-
 						var decoded = jwtService.decode( response.getData().token );
 						expect( decoded.sub ).toBe( response.getData().user.id );
 						expect( decoded.exp ).toBeGTE( dateAdd( "h", 1, decoded.iat ) );
+
+						// Test isolation: remove the user we just created
+						var created = getInstance( "User" ).where( "username", uname ).first();
+						if ( !isNull( created ) ) {
+							created.delete();
+						}
 					} );
 				} );
 				given( "invalid registration details", () => {
@@ -101,7 +106,7 @@ class extends="coldbox.system.testing.BaseTestCase" {
 				given( "a valid incoming jwt token", () => {
 					then( "my token should become invalidated and I will be logged out", () => {
 						// Log in first to get a valid token to logout with
-						var token   = jwtService.attempt( "admin", "admin" );
+						var token   = jwtService.attempt( "admin", "password" );
 						var payload = jwtService.decode( token );
 						expect( cbauth.isLoggedIn() ).toBeTrue();
 

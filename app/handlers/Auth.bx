@@ -44,8 +44,9 @@ class extends="coldbox.system.RestHandler" {
 		param rc.username  = "";
 		param rc.password  = "";
 
-		// Populate, Validate, Create a new user
-		prc.oUser = userService.create( populateModel( "User" ).validateOrFail() );
+		// Populate, Validate, Create a new user. Validate at the handler level (target form) —
+		// Quick entities can't use the Validatable delegate's entity-method validateOrFail().
+		prc.oUser = userService.create( validateOrFail( target = populateModel( "User" ) ) );
 
 		// Log them in if it was created!
 		event

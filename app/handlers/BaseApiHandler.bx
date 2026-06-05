@@ -1,0 +1,54 @@
+/**
+ * BaseApiHandler — thin base for cbqManager's REST handlers. Centralizes the current-actor lookup,
+ * the RBAC + per-Connection authorization gate (Authorization), and audit logging (AuditLog).
+ * Handlers stay shallow: parse params -> secure() -> call a deep module -> set response.
+ */
+class extends="coldbox.system.RestHandler" {
+
+	property name="authorization" inject="Authorization";
+	property name="auditLog"      inject="AuditLog";
+
+	/**
+	 * The authenticated actor as { id, role } (defaults to viewer/0 if unresolved).
+	 * TODO: align with the persisted User model's role accessor once it replaces the mock.
+	 */
+	private struct function actor(){
+		try {
+			var u = jwtAuth().getUser();
+			return { "id" : u.getId(), "role" : ( isNull( u.getRole() ) ? "viewer" : u.getRole() ) };
+		} catch ( any e ) {
+			return { "id" : 0, "role" : "viewer" };
+		}
+	}
+
+	/**
+	 * Authorize an action; on failure sets a 403 response and returns false.
+	 * Usage: `if ( !secure( event, "job.reset", rc.connectionId ) ) return;`
+	 */
+	private boolean function secure( required any event, required string action, numeric connectionId ){
+		var ok = isNull( arguments.connectionId )
+			? authorization.can( actor(), arguments.action )
+			: authorization.can( actor(), arguments.action, arguments.connectionId );
+		if ( !ok ){
+			arguments.event.getResponse().setError( true ).setStatusCode( 403 ).addMessage( "Forbidden: #arguments.action#" );
+		}
+		return ok;
+	}
+
+	/**
+	 * Record a mutation against the audit log using the current actor.
+	 */
+	private function audit( required string action, struct meta = {} ){
+		var who = actor();
+		auditLog.record( {
+			"userId"       : who.id,
+			"action"       : arguments.action,
+			"connectionId" : arguments.meta.connectionId ?: javacast( "null", "" ),
+			"targetType"   : arguments.meta.targetType ?: javacast( "null", "" ),
+			"targetId"     : arguments.meta.targetId ?: javacast( "null", "" ),
+			"detail"       : arguments.meta.detail ?: javacast( "null", "" ),
+			"result"       : arguments.meta.result ?: javacast( "null", "" )
+		} );
+	}
+
+}

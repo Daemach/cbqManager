@@ -1,0 +1,39 @@
+/**
+ * Batches — observe/cancel/delete/retry-failed and drill into a Batch's live Jobs (PRD batches).
+ */
+class extends="BaseApiHandler" {
+
+	property name="batchRepo" inject="BatchRepository";
+
+	function index( event, rc, prc ){
+		if ( !secure( event, "batch.list", rc.connectionId ) ) return;
+		event.getResponse().setDataWithPagination( batchRepo.list( rc.connectionId, rc.page ?: 1, rc.maxRows ?: 25 ) );
+	}
+
+	function cancel( event, rc, prc ){
+		if ( !secure( event, "batch.cancel", rc.connectionId ) ) return;
+		var n = batchRepo.cancel( rc.connectionId, rc.batchId );
+		audit( "batch.cancel", { connectionId : rc.connectionId, targetType : "batch", targetId : rc.batchId, result : "removedJobs=#n#" } );
+		event.getResponse().setData( { "removedJobs" : n } ).addMessage( "Batch cancelled" );
+	}
+
+	function retryFailed( event, rc, prc ){
+		if ( !secure( event, "batch.retryfailed", rc.connectionId ) ) return;
+		var n = batchRepo.retryFailed( rc.connectionId, rc.batchId );
+		audit( "batch.retryFailed", { connectionId : rc.connectionId, targetType : "batch", targetId : rc.batchId, result : "requeued=#n#" } );
+		event.getResponse().setData( { "requeued" : n } );
+	}
+
+	function drilldown( event, rc, prc ){
+		if ( !secure( event, "batch.get", rc.connectionId ) ) return;
+		event.getResponse().setData( batchRepo.drilldown( rc.connectionId, rc.batchId ) );
+	}
+
+	function remove( event, rc, prc ){
+		if ( !secure( event, "batch.delete", rc.connectionId ) ) return;
+		var n = batchRepo.deleteBatch( rc.connectionId, rc.batchId );
+		audit( "batch.delete", { connectionId : rc.connectionId, targetType : "batch", targetId : rc.batchId, result : "deleted=#n#" } );
+		event.getResponse().setData( { "deleted" : n } );
+	}
+
+}

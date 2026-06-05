@@ -1,0 +1,76 @@
+/**
+ * ArchiveRepository — cbqManager's long-lived local Archive of harvested Jobs and Queue Depth
+ * samples (ADR-0004). Lives in the own store; filterable by Connection + Queue + time.
+ */
+@singleton
+class {
+
+	property name="qbFactory" inject="QueryBuilderFactory";
+	property name="clock"     inject="Clock";
+
+	/**
+	 * Highest sourceId already archived for a Connection — the Harvester's dedup high-water mark.
+	 */
+	numeric function highWaterMark( required numeric connectionId ){
+		var row = own().from( "cbqm_archive_jobs" )
+			.where( "connectionId", arguments.connectionId )
+			.selectRaw( "MAX(sourceId) AS hw" )
+			.first();
+		return ( !isNull( row ) && !isNull( row.hw ?: javacast( "null", "" ) ) && isNumeric( row.hw ) ) ? row.hw : 0;
+	}
+
+	/**
+	 * Persist harvested terminal-job rows. Rows already present (unique connectionId+sourceId)
+	 * are skipped. TODO: use a grammar-portable upsert/insertIgnore instead of per-row guard.
+	 */
+	numeric function archiveJobs( required numeric connectionId, required array rows ){
+		var inserted = 0;
+		for ( var r in arguments.rows ){
+			r[ "connectionId" ]  = arguments.connectionId;
+			r[ "harvestedDate" ] = clock.nowUtc();
+			try {
+				own().from( "cbqm_archive_jobs" ).insert( r );
+				inserted++;
+			} catch ( any e ) {
+				// unique constraint => already archived; ignore
+			}
+		}
+		return inserted;
+	}
+
+	/**
+	 * Persist a Queue Depth sample set (one row per queue bucket).
+	 */
+	function sampleQueueDepth( required numeric connectionId, required array buckets ){
+		var stamp = clock.nowUtc();
+		for ( var b in arguments.buckets ){
+			b[ "connectionId" ] = arguments.connectionId;
+			b[ "sampledDate" ]  = stamp;
+			own().from( "cbqm_archive_queue_depth" ).insert( b );
+		}
+	}
+
+	/**
+	 * Long-memory job history, filterable by Connection / Queue / time range.
+	 */
+	struct function history( required numeric connectionId, struct filters = {}, numeric page = 1, numeric maxRows = 50 ){
+		var q = own().from( "cbqm_archive_jobs" ).where( "connectionId", arguments.connectionId );
+		if ( structKeyExists( arguments.filters, "queue" ) && len( arguments.filters.queue ) ) q.where( "queue", arguments.filters.queue );
+		if ( structKeyExists( arguments.filters, "jobState" ) && len( arguments.filters.jobState ) ) q.where( "jobState", arguments.filters.jobState );
+		return q.orderBy( "terminalDate", "desc" ).paginate( arguments.page, arguments.maxRows );
+	}
+
+	/**
+	 * Purge Archive rows older than the retention window (days).
+	 */
+	numeric function purgeOlderThan( required numeric days ){
+		var cutoff = dateAdd( "d", -arguments.days, clock.nowUtc() );
+		var r = own().from( "cbqm_archive_jobs" ).where( "harvestedDate", "<", cutoff ).delete();
+		return ( isStruct( r ) && structKeyExists( r, "result" ) ) ? ( r.result.recordCount ?: 0 ) : 0;
+	}
+
+	private function own(){
+		return variables.qbFactory.forOwnStore();
+	}
+
+}

@@ -1,0 +1,28 @@
+/**
+ * FailedJobs — enriched failed-job triage with Retry-via-Memento (ADR-0002, Q9).
+ */
+class extends="BaseApiHandler" {
+
+	property name="failedRepo" inject="FailedJobRepository";
+
+	function index( event, rc, prc ){
+		if ( !secure( event, "failedjob.list", rc.connectionId ) ) return;
+		var filters = { "filter" : rc.filter ?: "" };
+		event.getResponse().setDataWithPagination( failedRepo.list( rc.connectionId, filters, rc.page ?: 1, rc.maxRows ?: 25 ) );
+	}
+
+	function retry( event, rc, prc ){
+		if ( !secure( event, "failedjob.retry", rc.connectionId ) ) return;
+		var n = failedRepo.retry( rc.connectionId, rc.id, rc.deleteAfter ?: false );
+		audit( "failedjob.retry", { connectionId : rc.connectionId, targetType : "failedJob", targetId : rc.id, result : "requeued=#n#" } );
+		event.getResponse().setData( { "requeued" : n } ).addMessage( n ? "Re-queued" : "Failed job not found" );
+	}
+
+	function remove( event, rc, prc ){
+		if ( !secure( event, "failedjob.delete", rc.connectionId ) ) return;
+		var n = failedRepo.deleteFailed( rc.connectionId, rc.id );
+		audit( "failedjob.delete", { connectionId : rc.connectionId, targetType : "failedJob", targetId : rc.id, result : "deleted=#n#" } );
+		event.getResponse().setData( { "deleted" : n } );
+	}
+
+}

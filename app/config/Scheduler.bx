@@ -22,6 +22,30 @@ class {
 		 * You register tasks with the task() method and get back a ColdBoxScheduledTask object
 		 * that you can use to register your tasks configurations.
 		 */
+
+		var harvest = getSetting( "harvest" );
+
+		// Harvester (ADR-0004): snapshot terminal Jobs + Queue Depth into the local Archive
+		// before each target's cbq cleanup deletes them. Interval must be < the cleanup window.
+		if ( harvest.enabled ){
+			task( "cbqm-harvest" )
+				.call( () => getInstance( "Harvester" ).harvestAll() )
+				.every( harvest.intervalSeconds, "seconds" );
+
+			// Nightly Archive retention purge
+			task( "cbqm-archive-purge" )
+				.call( () => getInstance( "ArchiveRepository" ).purgeOlderThan( harvest.retentionDays ) )
+				.everyDayAt( "02:30" );
+		}
+
+		// Ongoing Orphan auto-heal guard (CONTEXT.md "Heal") — until the upstream DBProvider
+		// fix ships, periodically return Orphans to a lockable state across active Connections.
+		task( "cbqm-heal-orphans" )
+			.call( () => getInstance( "ConnectionRegistry" )
+				.list()
+				.filter( ( c ) => ( c.isActive ?: true ) )
+				.each( ( c ) => getInstance( "JobRepository" ).healOrphans( c.id ) ) )
+			.every( 5, "minutes" );
 	}
 
 	/**

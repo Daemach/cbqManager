@@ -1,0 +1,49 @@
+{
+    "name":"bx-sqlite",
+    "version":"1.2.0+5",
+    "location":"https://downloads.ortussolutions.com/ortussolutions/boxlang-modules/bx-sqlite/1.2.0/bx-sqlite-1.2.0.zip",
+    "author":"Ortus Solutions",
+    "homepage":"https://github.com/ortus-boxlang/bx-sqlite",
+    "documentation":"https://github.com/ortus-boxlang/bx-sqlite",
+    "repository":{
+        "type":"git",
+        "URL":"https://github.com/ortus-boxlang/bx-sqlite"
+    },
+    "bugs":"https://ortussolutions.atlassian.net/browse/BLMODULES",
+    "slug":"bx-sqlite",
+    "shortDescription":"Module template for BoxLang modules",
+    "type":"boxlang-modules",
+    "keywords":[
+        "boxlang"
+    ],
+    "boxlang":{
+        "minimumVersion":"1.0.0",
+        "moduleName":"sqlite"
+    },
+    "private":false,
+    "license":[
+        {
+            "type":"Apache-2.0",
+            "URL":"https://www.apache.org/licenses/LICENSE-2.0"
+        }
+    ],
+    "devDependencies":{
+        "commandbox-boxlang":"*",
+        "commandbox-cfformat":"*",
+        "commandbox-docbox":"*",
+        "testbox":"*"
+    },
+    "ignore":[
+        "**/.*",
+        "settings.gradle",
+        "gradlew.bat",
+        "gradlew",
+        "build.gradle",
+        "/src/**",
+        "gradle/**"
+    ],
+    "scripts":{
+        "setupTemplate":"task run taskFile=src/build/SetupTemplate.cfc",
+        "onRelease":"publish"
+    }
+}

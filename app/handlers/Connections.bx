@@ -1,0 +1,45 @@
+/**
+ * Connections — admin CRUD over the encrypted Connection Registry (admin-only; ADR-0003).
+ * Never returns secret fields to the client.
+ */
+class extends="BaseApiHandler" {
+
+	property name="registry" inject="ConnectionRegistry";
+
+	function index( event, rc, prc ){
+		if ( !secure( event, "connection.list" ) ) return;
+		event.getResponse().setData( registry.list() );
+	}
+
+	function show( event, rc, prc ){
+		if ( !secure( event, "connection.get" ) ) return;
+		var row = registry.get( rc.id );
+		// strip secrets before returning
+		structDelete( row, "secrets_enc" );
+		structDelete( row, "cipherIv" );
+		structDelete( row, "cipherAlg" );
+		event.getResponse().setData( row );
+	}
+
+	function create( event, rc, prc ){
+		if ( !secure( event, "connection.create" ) ) return;
+		var id = registry.create( rc );
+		audit( "connection.create", { targetType : "connection", targetId : id } );
+		event.getResponse().setData( { "id" : id } );
+	}
+
+	function update( event, rc, prc ){
+		if ( !secure( event, "connection.update" ) ) return;
+		registry.update( rc.id, rc );
+		audit( "connection.update", { targetType : "connection", targetId : rc.id } );
+		event.getResponse().addMessage( "Connection updated" );
+	}
+
+	function remove( event, rc, prc ){
+		if ( !secure( event, "connection.delete" ) ) return;
+		registry.remove( rc.id );
+		audit( "connection.delete", { targetType : "connection", targetId : rc.id } );
+		event.getResponse().addMessage( "Connection deleted" );
+	}
+
+}

@@ -1,0 +1,63 @@
+/**
+ * Playwright E2E bridge.
+ *
+ * Runs the frontend's JS Playwright suite and surfaces its pass/fail INSIDE the single TestBox
+ * report (`box testbox run`), so end-to-end coverage reports alongside unit/integration specs.
+ *
+ * SKIPPED BY DEFAULT — it requires the running Vite dev server (:9000), the ColdBox server
+ * (:60472), yarn, and installed Playwright browsers. Enable explicitly:
+ *
+ *     RUN_E2E=true box testbox run            (env var)
+ *     /tests/runner.bxm?RUN_E2E=true          (url flag)
+ *
+ * Dev / ideation loop: run the JS suite directly instead — `yarn --cwd frontend test:e2e`
+ * (or `yarn --cwd frontend test:e2e:ui`). Both modes are first-class by design.
+ *
+ * Alternative (reference pattern): native Playwright-Java specs can also live under tests/specs/e2e
+ * driving Playwright through Java interop; this bridge and that approach can coexist.
+ */
+class extends="coldbox.system.testing.BaseTestCase" {
+
+	function run(){
+		describe( "Frontend E2E (Playwright via TestBox bridge)", () => {
+
+			it(
+				title = "passes the browser E2E suite",
+				skip  = !shouldRun(),
+				body  = () => {
+					var result = runPlaywright();
+					expect( result.exitCode ).toBe(
+						0,
+						"Playwright E2E suite failed (exit #result.exitCode#):" & chr( 10 ) & result.output
+					);
+				}
+			);
+
+		} );
+	}
+
+	/**
+	 * Only run when explicitly opted-in (servers + browsers must be available).
+	 */
+	private boolean function shouldRun(){
+		return getSystemSetting( "RUN_E2E", "false" ) == "true";
+	}
+
+	/**
+	 * Shell out to the frontend Playwright suite and capture exit code + combined output.
+	 * Windows shell invocation; branch on OS if this ever runs on *nix CI.
+	 */
+	private struct function runPlaywright(){
+		var frontend = expandPath( "/tests/../frontend" );
+		var pb = createObject( "java", "java.lang.ProcessBuilder" ).init( [ "cmd", "/c", "yarn", "test:e2e" ] );
+		pb.directory( createObject( "java", "java.io.File" ).init( frontend ) );
+		pb.redirectErrorStream( true );
+
+		var process = pb.start();
+		var output  = toString( process.getInputStream() ); // read before waitFor to avoid buffer deadlock
+		var exit    = process.waitFor();
+
+		return { "exitCode" : exit, "output" : output };
+	}
+
+}

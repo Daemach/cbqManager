@@ -1,0 +1,220 @@
+/**
+ * JobRepository — the core deep module: per-Connection reads over a Managed App's cbq_jobs table
+ * plus GUARDED conditional control writes (ADR-0001, Q10). Every write's WHERE mirrors cbq's own
+ * guards so a write that loses a race with a live Worker safely affects zero rows. All mutating
+ * methods return the affected-row count (0 = safe no-op / state changed).
+ *
+ * Tested against a SQLite cbq_jobs fixture (PRD Testing Decisions).
+ */
+@singleton
+class {
+
+	property name="qbFactory"  inject="QueryBuilderFactory";
+	property name="registry"   inject="ConnectionRegistry";
+	property name="analyzer"   inject="QueueHealthAnalyzer";
+	property name="classifier" inject="JobStateClassifier";
+	property name="clock"      inject="Clock";
+
+	// qb null-value marker (cbq uses this form for nulling columns)
+	variables.NULL = { "value" : "", "null" : true, "nulls" : true };
+	// "Parked" sentinel availableDate — 2099-01-01 epoch (CONTEXT.md "Park")
+	variables.PARK_EPOCH = 4070908800;
+
+	// ---- reads -------------------------------------------------------------
+
+	/**
+	 * Paginated, queue/state-filterable list of Jobs, each annotated with its Job State.
+	 */
+	struct function list( required numeric connectionId, struct filters = {}, numeric page = 1, numeric maxRows = 25 ){
+		var conn = registry.resolve( arguments.connectionId );
+		var now  = clock.epoch();
+		var q    = builder( conn ).from( conn.tableName );
+
+		if ( structKeyExists( arguments.filters, "queue" ) && len( arguments.filters.queue ) ){
+			q.where( "queue", arguments.filters.queue );
+		}
+		if ( structKeyExists( arguments.filters, "openOnly" ) && arguments.filters.openOnly ){
+			q.whereNull( "completedDate" ).whereNull( "failedDate" );
+		}
+		if ( structKeyExists( arguments.filters, "mapping" ) && len( arguments.filters.mapping ) ){
+			// payload contains the mapping; LIKE keeps it grammar-portable
+			q.whereLike( "payload", "%#arguments.filters.mapping#%" );
+		}
+
+		var data = q.orderBy( "id" ).paginate( arguments.page, arguments.maxRows );
+		data.results = data.results.map( ( row ) => {
+			row[ "state" ] = classifier.classify( row, now );
+			return row;
+		} );
+		return data;
+	}
+
+	/**
+	 * Per-Queue Queue Health buckets for a Connection (the headline diagnostic).
+	 */
+	array function queueHealth( required numeric connectionId ){
+		var conn = registry.resolve( arguments.connectionId );
+		var rows = builder( conn )
+			.from( conn.tableName )
+			.whereNull( "completedDate" )
+			.whereNull( "failedDate" )
+			.get();
+		return analyzer.analyze( rows, clock.epoch() );
+	}
+
+	/**
+	 * The Next Up Job for a Connection's pool, using its (configured/inferred) queue priority.
+	 */
+	struct function nextUp( required numeric connectionId, array queuePriority = [] ){
+		var conn = registry.resolve( arguments.connectionId );
+		var rows = builder( conn )
+			.from( conn.tableName )
+			.whereNull( "completedDate" )
+			.whereNull( "failedDate" )
+			.get();
+		return analyzer.nextUp( rows, clock.epoch(), arguments.queuePriority );
+	}
+
+	// ---- guarded control writes (return affected row count) ----------------
+
+	/** Mark a Job complete so the pool skips it. */
+	numeric function markComplete( required numeric connectionId, required numeric id ){
+		var conn = registry.resolve( arguments.connectionId );
+		return affected(
+			builder( conn ).from( conn.tableName )
+				.where( "id", arguments.id )
+				.whereNull( "completedDate" ).whereNull( "failedDate" )
+				.update( { "completedDate" : clock.epoch() } )
+		);
+	}
+
+	/** Reset a stuck Job back to Available (Q10 — caller must enforce the stuck-threshold). */
+	numeric function reset( required numeric connectionId, required numeric id ){
+		var conn = registry.resolve( arguments.connectionId );
+		return affected(
+			builder( conn ).from( conn.tableName )
+				.where( "id", arguments.id )
+				.whereNull( "completedDate" ).whereNull( "failedDate" )
+				.update( {
+					"reservedDate"  : variables.NULL,
+					"reservedBy"    : variables.NULL,
+					"availableDate" : clock.epoch()
+				} )
+		);
+	}
+
+	/** Heal Orphans: return un-lockable claims to a fresh, lockable state (CONTEXT.md "Heal"). */
+	numeric function healOrphans( required numeric connectionId, string queue = "" ){
+		var conn = registry.resolve( arguments.connectionId );
+		var now  = clock.epoch();
+		var q    = builder( conn ).from( conn.tableName )
+			.whereNull( "completedDate" ).whereNull( "failedDate" )
+			.whereNull( "reservedDate" ).whereNotNull( "reservedBy" )
+			.where( "availableDate", "<=", now );
+		if ( len( arguments.queue ) ) q.where( "queue", arguments.queue );
+		return affected( q.update( { "reservedBy" : variables.NULL } ) );
+	}
+
+	/** Park due Jobs (remove from pickable without deleting) — reversible via Throttled Release. */
+	numeric function park( required numeric connectionId, string queue = "" ){
+		var conn = registry.resolve( arguments.connectionId );
+		var now  = clock.epoch();
+		var q    = builder( conn ).from( conn.tableName )
+			.whereNull( "completedDate" ).whereNull( "failedDate" )
+			.where( "availableDate", "<=", now );
+		if ( len( arguments.queue ) ) q.where( "queue", arguments.queue );
+		return affected( q.update( {
+			"reservedBy"    : variables.NULL,
+			"reservedDate"  : variables.NULL,
+			"availableDate" : variables.PARK_EPOCH
+		} ) );
+	}
+
+	/**
+	 * Throttled Release: re-make Parked Jobs due in staggered windows.
+	 * TODO: full per-window staggering (ROW_NUMBER over queue priority). This scaffold releases
+	 *       a single window of `perWindow` Jobs due in `startIn` seconds; call repeatedly.
+	 */
+	numeric function throttledRelease( required numeric connectionId, numeric perWindow = 20, numeric startIn = 30, string queue = "" ){
+		var conn = registry.resolve( arguments.connectionId );
+		var ids  = builder( conn ).from( conn.tableName )
+			.where( "availableDate", variables.PARK_EPOCH )
+			.when( len( arguments.queue ), ( q ) => q.where( "queue", arguments.queue ) )
+			.orderBy( "id" )
+			.limit( arguments.perWindow )
+			.values( "id" );
+		if ( !arrayLen( ids ) ) return 0;
+		return affected(
+			builder( conn ).from( conn.tableName )
+				.whereIn( "id", ids )
+				.update( { "availableDate" : clock.epoch() + arguments.startIn } )
+		);
+	}
+
+	/** Quarantine a poison Job by moving it to a parked queue no pool works. */
+	numeric function quarantine( required numeric connectionId, required numeric id, string toQueue = "quarantine" ){
+		var conn = registry.resolve( arguments.connectionId );
+		return affected(
+			builder( conn ).from( conn.tableName )
+				.where( "id", arguments.id )
+				.whereNull( "completedDate" ).whereNull( "failedDate" )
+				.update( {
+					"queue"        : arguments.toQueue,
+					"reservedDate" : variables.NULL,
+					"reservedBy"   : variables.NULL
+				} )
+		);
+	}
+
+	/** Discard stale Jobs by queue + age (mark failed; kept for audit). */
+	numeric function discardStale( required numeric connectionId, required string queue, required numeric olderThanEpoch ){
+		var conn = registry.resolve( arguments.connectionId );
+		var now  = clock.epoch();
+		return affected(
+			builder( conn ).from( conn.tableName )
+				.whereNull( "completedDate" ).whereNull( "failedDate" )
+				.where( "availableDate", "<=", now )
+				.where( "createdDate", "<", arguments.olderThanEpoch )
+				.where( "queue", arguments.queue )
+				.update( { "failedDate" : now } )
+		);
+	}
+
+	/** Delete a Job unless it is genuinely in-flight (reserved with a future availableDate). */
+	numeric function deleteJob( required numeric connectionId, required numeric id ){
+		var conn = registry.resolve( arguments.connectionId );
+		var now  = clock.epoch();
+		return affected(
+			builder( conn ).from( conn.tableName )
+				.where( "id", arguments.id )
+				.where( ( g ) => g.whereNull( "reservedDate" ).orWhere( "availableDate", "<=", now ) )
+				.delete()
+		);
+	}
+
+	/**
+	 * Insert a row directly (used by Retry — the MementoPayloadBuilder produces the row).
+	 */
+	numeric function insertRow( required numeric connectionId, required struct row ){
+		var conn = registry.resolve( arguments.connectionId );
+		return affected( builder( conn ).from( conn.tableName ).insert( arguments.row ) );
+	}
+
+	// ---- helpers -----------------------------------------------------------
+
+	private function builder( required struct conn ){
+		return variables.qbFactory.forConnection( arguments.conn );
+	}
+
+	/**
+	 * Extract affected-row count from a qb result, defaulting to 0.
+	 * TODO: confirm qb's exact result shape for insert/update/delete on the target grammars.
+	 */
+	private numeric function affected( required any result ){
+		if ( isStruct( arguments.result ) && structKeyExists( arguments.result, "result" ) ){
+			return arguments.result.result.recordCount ?: 0;
+		}
+		return 0;
+	}
+
+}

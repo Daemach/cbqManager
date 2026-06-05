@@ -1,0 +1,42 @@
+/**
+ * AuditLog — append-only record of every mutation (PRD Q14). Control actions and registry/user
+ * changes call record() so production activity is fully attributable.
+ */
+@singleton
+class {
+
+	property name="qbFactory" inject="QueryBuilderFactory";
+	property name="clock"     inject="Clock";
+
+	/**
+	 * Record an audit entry.
+	 *
+	 * @entry struct { userId, username, action, connectionId, targetType, targetId, detail, result }
+	 */
+	function record( required struct entry ){
+		var row = {
+			"userId"       : arguments.entry.userId       ?: javacast( "null", "" ),
+			"username"     : arguments.entry.username     ?: javacast( "null", "" ),
+			"action"       : arguments.entry.action,
+			"connectionId" : arguments.entry.connectionId ?: javacast( "null", "" ),
+			"targetType"   : arguments.entry.targetType   ?: javacast( "null", "" ),
+			"targetId"     : toString( arguments.entry.targetId ?: "" ),
+			"detail"       : isNull( arguments.entry.detail ?: javacast( "null", "" ) ) ? javacast( "null", "" ) : ( isSimpleValue( arguments.entry.detail ) ? arguments.entry.detail : jsonSerialize( arguments.entry.detail ) ),
+			"result"       : arguments.entry.result       ?: javacast( "null", "" ),
+			"createdDate"  : clock.nowUtc()
+		};
+		variables.qbFactory.forOwnStore().from( "cbqm_audit_log" ).insert( row );
+	}
+
+	/**
+	 * Read audit entries with simple filtering/pagination.
+	 */
+	struct function list( struct filters = {}, numeric page = 1, numeric maxRows = 50 ){
+		var q = variables.qbFactory.forOwnStore().from( "cbqm_audit_log" ).orderBy( "createdDate", "desc" );
+		if ( structKeyExists( arguments.filters, "connectionId" ) ) q.where( "connectionId", arguments.filters.connectionId );
+		if ( structKeyExists( arguments.filters, "userId" ) )       q.where( "userId", arguments.filters.userId );
+		if ( structKeyExists( arguments.filters, "action" ) )       q.where( "action", arguments.filters.action );
+		return q.paginate( arguments.page, arguments.maxRows );
+	}
+
+}

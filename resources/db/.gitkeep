@@ -1,0 +1,2 @@
+# SQLite own-store lives here as cbqmanager.db (gitignored). This directory must exist before
+# first connect — SQLite creates the file, not the folder.

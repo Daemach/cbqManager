@@ -1,0 +1,65 @@
+/**
+ * QueryBuilderFactory — builds qb instances bound to a Connection's grammar + runtime datasource
+ * (ADR-0005). This is what lets cbqManager manage cbq on ANY qb-supported engine and lets its
+ * own store run on SQLite or MSSQL with no code change. Managed datasources are runtime structs
+ * (from the encrypted registry), so qb instances are built per-request, not pre-wired in WireBox.
+ */
+@singleton
+class {
+
+	property name="wirebox" inject="wirebox";
+
+	// grammar key (lowercased, no "grammar" suffix) -> qb grammar component name
+	variables.grammarMap = {
+		"sqlserver" : "SqlServerGrammar",
+		"mssql"     : "SqlServerGrammar",
+		"mysql"     : "MySQLGrammar",
+		"postgres"  : "PostgresGrammar",
+		"oracle"    : "OracleGrammar",
+		"sqlite"    : "SQLiteGrammar",
+		"derby"     : "DerbyGrammar"
+	};
+
+	/**
+	 * A qb bound to a resolved Connection (must include `.grammar` and a `.datasource` struct).
+	 */
+	function forConnection( required struct connection ){
+		var grammar = variables.wirebox.getInstance( resolveGrammarId( arguments.connection.grammar ?: "auto" ) );
+		// TODO: optionally wrap `grammar` in an auto-retry decorator (generalize AutoRetrySqlServerGrammar)
+		//       when connection.autoRetry is true, for busy production queue tables.
+		return variables.wirebox.getInstance(
+			name          = "qb.models.Query.QueryBuilder",
+			initArguments = { "grammar" : grammar, "defaultOptions" : { "datasource" : arguments.connection.datasource } }
+		);
+	}
+
+	/**
+	 * A qb bound to cbqManager's own store.
+	 */
+	function forOwnStore(){
+		return variables.wirebox.getInstance(
+			name          = "qb.models.Query.QueryBuilder",
+			initArguments = { "defaultOptions" : { "datasource" : "cbqManager" } }
+		);
+	}
+
+	/**
+	 * Auto-detect the grammar for a runtime datasource (used once at registration; result is
+	 * persisted and operator-overridable — PRD Q12).
+	 *
+	 * @datasource Runtime datasource struct.
+	 *
+	 * @return a grammar key (e.g. "sqlserver"), or "auto" if undetermined.
+	 * TODO: probe via qb AutoDiscover / a lightweight metadata query.
+	 */
+	string function detectGrammar( required struct datasource ){
+		return "auto";
+	}
+
+	private string function resolveGrammarId( required string grammar ){
+		var key  = lCase( reReplaceNoCase( arguments.grammar, "grammar$", "" ) );
+		var name = structKeyExists( variables.grammarMap, key ) ? variables.grammarMap[ key ] : "AutoDiscover";
+		return "qb.models.Grammars.#name#";
+	}
+
+}

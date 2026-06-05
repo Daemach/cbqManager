@@ -12,6 +12,30 @@ class extends="coldbox.system.EventHandler" {
 	 */
 
 	function onAppInit( event, rc, prc ){
+		seedDefaultAdmin();
+	}
+
+	/**
+	 * Easy initial setup: in development, create a default admin (admin/password) the first time
+	 * the app boots against an empty user table. Idempotent — only runs when there are no users.
+	 */
+	private function seedDefaultAdmin(){
+		if ( getSetting( "environment" ) != "development" ){
+			return;
+		}
+		var User = getInstance( "User" );
+		if ( User.count() > 0 ){
+			return;
+		}
+		getInstance( "User" )
+			.setUsername( "admin" )
+			.setFirstName( "Admin" )
+			.setLastName( "User" )
+			.setPassword( "password" )
+			.setRole( "admin" )
+			.setIsActive( true )
+			.save();
+		log.info( "Seeded default admin user (admin/password)" );
 	}
 
 	function onRequestStart( event, rc, prc ){

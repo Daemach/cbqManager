@@ -52,10 +52,33 @@ class{
 
 	/**
 	 * --------------------------------------------------------------------------
-	 * ORM + Datasource Settings
+	 * Datasource Settings
 	 * --------------------------------------------------------------------------
+	 * cbqManager's OWN store (users, Connection Registry, Broadcast Connections,
+	 * Archive, audit log). Starts on SQLite for zero local dependency and moves to
+	 * MSSQL by changing the CBQM_DB_* env vars only (ADR-0005). The grammar-agnostic
+	 * QueryBuilderFactory binds qb to whatever this datasource is.
+	 *
+	 * Managed Apps' cbq datasources are NOT defined here — they are registered at
+	 * runtime in the encrypted Connection Registry and resolved per-request (ADR-0003).
 	 */
-	this.datasource = "coldbox"
+	// Resolve the SQLite own-store file to an ABSOLUTE path with forward slashes — the server's
+	// working directory is NOT the project root, so a relative jdbc:sqlite path fails. Override
+	// CBQM_DB_CONNECTIONSTRING (e.g. for MSSQL) to bypass this default entirely.
+	variables._cbqmDbFile = replace(
+		getCanonicalPath( COLDBOX_APP_ROOT_PATH & "/../resources/db/cbqmanager.db" ),
+		"\",
+		"/",
+		"all"
+	)
+	this.datasources[ "cbqManager" ] = {
+		// BoxLang uses a registered driver NAME (bx-sqlite registers "sqlite"). The SQLite driver
+		// wants a `database` file path and builds the jdbc:sqlite URL itself.
+		// (For MSSQL later, switch to driver "mssql" with host/port/database/username/password.)
+		"driver"   : getSystemSetting( "CBQM_DB_DRIVER", "sqlite" ),
+		"database" : getSystemSetting( "CBQM_DB_DATABASE", variables._cbqmDbFile )
+	}
+	this.datasource = "cbqManager"
 
 	/**
 	 * Fires when the application starts

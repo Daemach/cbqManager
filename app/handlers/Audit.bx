@@ -1,0 +1,16 @@
+/**
+ * Audit — browse the audit log (admin-only; PRD Q14).
+ */
+class extends="BaseApiHandler" {
+
+	property name="auditLogModel" inject="AuditLog";
+
+	function index( event, rc, prc ){
+		if ( !secure( event, "user.audit" ) ) return; // admin tier (user.* => admin)
+		var filters = {};
+		if ( !isNull( rc.connectionId ) ) filters[ "connectionId" ] = rc.connectionId;
+		if ( !isNull( rc.action ) )       filters[ "action" ]       = rc.action;
+		event.getResponse().setDataWithPagination( auditLogModel.list( filters, rc.page ?: 1, rc.maxRows ?: 50 ) );
+	}
+
+}

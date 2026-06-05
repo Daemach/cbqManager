@@ -1,0 +1,17 @@
+/**
+ * cbq module configuration.
+ *
+ * cbqManager is a standalone console that does NOT run cbq jobs — it reads/controls other apps'
+ * cbq tables directly via qb (ADR-0001). The cbq module is only present as a dependency, so this
+ * config is intentionally minimal: a single in-process (Sync) connection and no Worker Pools, so
+ * cbq loads cleanly without starting any background workers.
+ *
+ * (If cbq is later removed as a dependency entirely, delete this file.)
+ */
+class {
+
+	function configure(){
+		newConnection( "default" ).setProvider( "SyncProvider@cbq" );
+	}
+
+}

@@ -1,0 +1,55 @@
+/**
+ * Authorization — RBAC plus per-Connection scope (PRD Q14). Global role sets the capability
+ * tier (viewer < operator < admin); per-Connection grants decide WHERE an operator may act.
+ * Admin manages the vault/users. Absence of a grant = no access to that Connection.
+ */
+@singleton
+class {
+
+	property name="qbFactory" inject="QueryBuilderFactory";
+
+	/**
+	 * Whether `user` may perform `action` (optionally scoped to `connectionId`).
+	 *
+	 * @user         struct { id, role } of the current user.
+	 * @action       dotted action, e.g. "job.reset", "connection.create", "queue.health".
+	 * @connectionId optional Connection scope.
+	 */
+	boolean function can( required struct user, required string action, numeric connectionId ){
+		var role = arguments.user.role ?: "viewer";
+		var cap  = capabilityFor( arguments.action );
+
+		switch ( cap ){
+			case "admin":
+				return role == "admin";
+			case "view":
+				return role == "admin" || isNull( arguments.connectionId ) || hasAccess( arguments.user.id, arguments.connectionId, false );
+			case "control":
+				if ( role == "admin" ) return true;
+				if ( role == "viewer" ) return false;
+				return !isNull( arguments.connectionId ) && hasAccess( arguments.user.id, arguments.connectionId, true );
+		}
+		return false;
+	}
+
+	/**
+	 * Capability tier required by an action.
+	 */
+	string function capabilityFor( required string action ){
+		if ( reFindNoCase( "^(connection|broadcast|user)\.", arguments.action ) ) return "admin";
+		if ( reFindNoCase( "\.(list|get|health|nextup|view|show)$", arguments.action ) ) return "view";
+		return "control";
+	}
+
+	private boolean function hasAccess( required numeric userId, required numeric connectionId, required boolean needControl ){
+		var grant = variables.qbFactory.forOwnStore()
+			.from( "cbqm_connection_grants" )
+			.where( "userId", arguments.userId )
+			.where( "connectionId", arguments.connectionId )
+			.first();
+		// qb's first() returns an EMPTY STRUCT (not null) when there is no row.
+		if ( isNull( grant ) || structIsEmpty( grant ) ) return false;
+		return arguments.needControl ? ( grant.canControl ?: false ) : true;
+	}
+
+}

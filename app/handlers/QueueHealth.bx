@@ -1,0 +1,14 @@
+/**
+ * QueueHealth — the headline diagnostic: per-Queue buckets (open/orphaned/pickable/in-flight/
+ * scheduled) for a Connection (CONTEXT.md "Queue Health"). Read-only.
+ */
+class extends="BaseApiHandler" {
+
+	property name="jobRepo" inject="JobRepository";
+
+	function index( event, rc, prc ){
+		if ( !secure( event, "queue.health", rc.connectionId ) ) return;
+		event.getResponse().setData( jobRepo.queueHealth( rc.connectionId ) );
+	}
+
+}

@@ -7,7 +7,18 @@
       "Read(//f/dev/Veriti/cbq-worker/**)",
       "Bash(cd /f/dev/Veriti/cbq-worker 2>/dev/null; echo \"===failedJobs.js===\"; cat views/monitor/failedJobs.js 2>/dev/null | head -200)",
       "Bash(cd /f/dev/Veriti/cbq-worker)",
-      "Bash(sed -n '200,400p' views/monitor/failedJobs.js)"
+      "Bash(sed -n '200,400p' views/monitor/failedJobs.js)",
+      "Bash(box help *)",
+      "Bash(box migrate *)",
+      "Bash(mkdir -p ~/.CommandBox/lib)",
+      "mcp__boxlang__searchDocumentation",
+      "Bash(yarn --version)",
+      "Bash(curl -s -m 20 \"http://127.0.0.1:60472/?fwreinit=1\" -o /dev/null)",
+      "Bash(yarn --cwd frontend test:e2e)",
+      "Bash(yarn --cwd frontend test:e2e connections-ui)"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\johnw\\.CommandBox"
     ]
   }
 }
