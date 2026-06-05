@@ -4,7 +4,17 @@ A self-contained prompt for one iteration of the build loop. **Each iteration st
 prior context** — it re-derives everything from the repo. Run it self-paced with `/loop` (omit the
 interval) or via the ralph-loop plugin, feeding the SAME prompt back each time.
 
-> Launch (self-paced): `/loop` then paste the prompt below (or `/loop <paste>`).
+> Launch (bounded, 3 slices — recommended for a supervised run): paste the LOOP PROMPT section into
+> ralph-loop with a hard cap and an early-exit promise:
+>
+> ```
+> /ralph-loop <LOOP PROMPT> --max-iterations 3 --completion-promise "No open `ready-for-agent` issues remain AND every slice implemented this run was merged to main via its own green PR"
+> ```
+>
+> `--max-iterations 3` stops after at most 3 slices; the completion promise stops it earlier only if
+> the backlog is genuinely drained and merged. Drop `--max-iterations` to run until the promise holds.
+> Self-paced alternative: `/loop` then paste the prompt (shares this session's context).
+>
 > The loop drains `ready-for-agent` issues; when the backlog is dry it derives the next slice from
 > the PRDs and creates it. One reviewable slice per iteration, branch + PR, never push to `main`.
 
