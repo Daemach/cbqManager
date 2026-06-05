@@ -7,7 +7,8 @@
 @singleton
 class {
 
-	property name="wirebox" inject="wirebox";
+	property name="wirebox"      inject="wirebox";
+	property name="sqlCommenter" inject="TolerantSqlCommenter";
 
 	// grammar key (lowercased, no "grammar" suffix) -> qb grammar component name
 	variables.grammarMap = {
@@ -29,7 +30,13 @@ class {
 		//       when connection.autoRetry is true, for busy production queue tables.
 		return variables.wirebox.getInstance(
 			name          = "qb.models.Query.QueryBuilder",
-			initArguments = { "grammar" : grammar, "defaultOptions" : { "datasource" : arguments.connection.datasource } }
+			initArguments = {
+				// Tolerant commenter: managed Connections bind an on-the-fly datasource STRUCT, which
+				// qb's stock commenters reject (they declare `datasource` as string). See ADR-0005.
+				"grammar"        : grammar,
+				"sqlCommenter"   : variables.sqlCommenter,
+				"defaultOptions" : { "datasource" : arguments.connection.datasource }
+			}
 		);
 	}
 

@@ -1,0 +1,18 @@
+/**
+ * TolerantSqlCommenter — a no-op qb SQL commenter whose `datasource` argument accepts ANY type.
+ *
+ * qb 13.x declares `appendSqlComments( required string sql, string datasource, ... )`. cbqManager
+ * binds managed Connections to ON-THE-FLY datasource STRUCTS (ADR-0005: runtime datasources from
+ * the encrypted registry, not pre-registered names), so the stock commenters reject the struct with
+ * "argument [datasource] ... does not match the declared type of [string]" and every tool query
+ * 500s. This variant relaxes the type and returns the SQL unchanged, letting struct-bound qb queries
+ * run. Used only for `forConnection()`; the own store keeps qb's default commenter (it passes a name).
+ */
+@singleton
+class {
+
+	string function appendSqlComments( required string sql, any datasource, array bindings = [] ){
+		return arguments.sql;
+	}
+
+}

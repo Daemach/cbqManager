@@ -66,9 +66,12 @@ class {
 			"cbqmDatasource"  : "cbqManager",
 			// Credential vault (ADR-0003) — key lives ONLY in the environment
 			"encryptionKey"   : getSystemSetting( "CBQM_ENCRYPTION_KEY", "" ),
-			// Harvester / Archive (ADR-0004)
+			// Harvester / Archive (ADR-0004). The Harvester writes Archive snapshots to the own store
+			// on an interval. SQLite is single-writer and (on some volumes) WAL-incapable, so a
+			// background Harvester contends with request writes. Default it OFF when the own store is
+			// SQLite and ON for a concurrency-capable store (e.g. MSSQL); CBQM_HARVEST_ENABLED overrides.
 			"harvest" : {
-				"enabled"          : getSystemSetting( "CBQM_HARVEST_ENABLED", true ),
+				"enabled"          : getSystemSetting( "CBQM_HARVEST_ENABLED", getSystemSetting( "CBQM_DB_DRIVER", "sqlite" ) != "sqlite" ),
 				"intervalSeconds"  : getSystemSetting( "CBQM_HARVEST_INTERVAL", 60 ),
 				"retentionDays"    : getSystemSetting( "CBQM_ARCHIVE_RETENTION_DAYS", 180 )
 			},

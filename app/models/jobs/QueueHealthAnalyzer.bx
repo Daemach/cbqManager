@@ -42,7 +42,7 @@ class {
 			}
 		}
 
-		return structValues( byQueue ).sort( ( a, b ) => {
+		return byQueue.valueArray().sort( ( a, b ) => {
 			if ( a.orphanedBlockers != b.orphanedBlockers ) return b.orphanedBlockers - a.orphanedBlockers;
 			return b.pickableFresh - a.pickableFresh;
 		} );

@@ -1,0 +1,51 @@
+/**
+ * Regression for the tool-layer 500: qb's SQL-commenter rejected cbqManager's on-the-fly datasource
+ * STRUCTS (ADR-0005), so every Connection tool (Queue Health / Jobs / Failed Jobs / Batches) threw
+ *   "In function [appendSqlComments], argument [datasource] ... does not match the declared type of [string]".
+ *
+ * Asserts EXTERNAL behavior of the fix without executing a query (executing against a struct
+ * datasource would open a second handle to the SQLite own store and deadlock the rest of the suite):
+ *   1. forConnection() wires the tolerant commenter into the qb instance, and
+ *   2. that commenter accepts a STRUCT datasource (the exact argument that used to throw).
+ * End-to-end proof that the tools now return 200 is covered by the live smoke against FTDIQueue.
+ */
+@autowire
+class extends="coldbox.system.testing.BaseTestCase" {
+
+	@inject( "QueryBuilderFactory" )
+	property name="qbFactory";
+
+	function beforeAll(){ super.beforeAll(); }
+	function afterAll(){ super.afterAll(); }
+
+	function run(){
+		describe( "QueryBuilderFactory struct-datasource binding", () => {
+
+			beforeEach( ( currentSpec ) => {
+				setup();
+			} );
+
+			it( "forConnection wires the tolerant SQL commenter (so struct datasources don't throw the [string] type error)", () => {
+				// Building the qb opens NO connection — the dummy datasource struct is never executed.
+				var qb = qbFactory.forConnection( {
+					"grammar"    : "sqlite",
+					"datasource" : { "driver" : "sqlite", "database" : "unused" }
+				} );
+
+				var commenter = qb.getSqlCommenter();
+				expect( getMetadata( commenter ).name ).toInclude( "TolerantSqlCommenter" );
+
+				// The wired commenter tolerates the STRUCT datasource that previously 500'd every tool.
+				expect( commenter.appendSqlComments( sql = "SELECT 1", datasource = { "driver" : "sqlite" } ) ).toBe( "SELECT 1" );
+			} );
+
+			it( "the tolerant commenter returns SQL unchanged when handed a struct datasource", () => {
+				var commenter = getInstance( "TolerantSqlCommenter" );
+				var sql       = "SELECT * FROM cbq_jobs";
+				expect( commenter.appendSqlComments( sql = sql, datasource = { "driver" : "generic" }, bindings = [] ) ).toBe( sql );
+			} );
+
+		} );
+	}
+
+}
