@@ -1,5 +1,10 @@
 /**
  * Protects the application from being accessed directly.
+ *
+ * NOTE: The real Application bootstrap lives in /public/Application.bx (modern template).
+ * cbqManager's own datasource is defined there via `this.datasources`, driven by the
+ * `CBQM_*` environment variables (see .env.example). cbqManager's own store starts on
+ * SQLite (zero local dependency) and can move to MSSQL by changing those vars only (ADR-0005).
  */
 class {
 	abort;

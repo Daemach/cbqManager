@@ -4,16 +4,15 @@
         "migrationsDirectory": "resources/database/migrations/",
         "seedsDirectory": "resources/database/seeds/",
         "properties": {
-            "defaultGrammar": "AutoDiscover@qb",
-            "schema": "${DB_SCHEMA}",
+            "defaultGrammar": "SQLiteGrammar@qb",
             "migrationsTable": "cfmigrations",
             "connectionInfo": {
-                type: "${DB_DRIVER}",
-                database: "${DB_DATABASE}",
-                host: "${DB_HOST}",
-                port: ${DB_PORT},
-                username: "${DB_USER}",
-                password: "${DB_PASSWORD}"
+                "class": "org.sqlite.JDBC",
+                "bundleName": "org.xerial.sqlite-jdbc",
+                "bundleVersion": "3.45.3.0",
+                "connectionString": "jdbc:sqlite:./resources/db/cbqmanager.db",
+                "username": "",
+                "password": ""
             }
         }
     }

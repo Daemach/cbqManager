@@ -1,30 +1,80 @@
 /**
- * A user in the system.
+ * User — Quick ORM entity mapped to the cbqm_users own-store table.
  *
- * This user is based off the Auth User included in cbsecurity, which implements already several interfaces and properties.
- * - https://coldbox-security.ortusbooks.com/usage/authentication-services#iauthuser
- * - https://coldbox-security.ortusbooks.com/jwt/jwt-services#jwt-subject-interface
- *
- * It also leverages several delegates for Validation, Population, Authentication, Authorization and JWT Subject.
+ * Implements the cbsecurity JWT subject + auth-user surface directly (like the reference entity):
+ * isLoaded()/getId() come from Quick; passwords are bcrypt-hashed on assignment; the single RBAC
+ * role is exposed through getRoles() for cbsecurity authorization.
  */
-@transientCache( false )
 class
-	extends       ="cbsecurity.models.auth.User"
-	delegates     ="
-		Validatable@cbvalidation,
-		Population@cbDelegates,
-		Auth@cbSecurity,
-		Authorizable@cbSecurity,
-		JwtSubject@cbSecurity
-	"
+	extends   ="quick.models.BaseEntity"
+	accessors ="true"
+	table     ="cbqm_users"
 {
 
+	property name="bcrypt" inject="@BCrypt" persistent="false";
+
+	property name="id";
+	property name="username";
+	property name="firstName";
+	property name="lastName";
+	property name="password";
+	property name="role";
+	property name="isActive";
+	property name="createdDate" readonly="true";
+	property name="modifiedDate";
+
+	// Mementifier serialization — NEVER expose the password hash
+	this.memento = {
+		defaultIncludes : [ "id", "username", "firstName", "lastName", "role", "isActive" ],
+		neverInclude    : [ "password" ]
+	};
+
+	// Validation (cbvalidation) — read by the handler-level validateOrFail( target = ... ).
+	// NOT the entity-method form: Quick's onMissingMethod shadows the Validatable delegate.
+	this.constraints = {
+		firstName : { required : true },
+		lastName  : { required : true },
+		username  : { required : true },
+		password  : { required : true }
+	};
+
+	// Mass-assignment guard — id/role/isActive are set server-side, never by the client
+	this.population = { exclude : [ "id", "role", "isActive" ] };
+
 	/**
-	 * Constructor
+	 * Hash the password with bcrypt on assignment.
 	 */
-	function init(){
-		super.init()
-		return this
+	function setPassword( required string password ){
+		return assignAttribute( "password", bcrypt.hashPassword( arguments.password ) );
+	}
+
+	/**
+	 * Verify a candidate password against the stored bcrypt hash.
+	 */
+	boolean function isValidPassword( required string password ){
+		return bcrypt.checkPassword( arguments.password, this.getPassword() );
+	}
+
+	/**
+	 * RBAC roles for cbsecurity — single role column surfaced as an array.
+	 */
+	array function getRoles(){
+		return [ getRole() ?: "viewer" ];
+	}
+
+	boolean function hasPermission( required string permission ){
+		return getRoles().containsNoCase( arguments.permission );
+	}
+
+	/**
+	 * JWT subject: custom claims + scopes.
+	 */
+	struct function getJWTCustomClaims(){
+		return { "role" : getRole() ?: "viewer" };
+	}
+
+	array function getJWTScopes(){
+		return getRoles();
 	}
 
 }

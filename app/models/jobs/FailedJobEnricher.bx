@@ -1,0 +1,74 @@
+/**
+ * FailedJobEnricher — pure: parses raw cbq_failed_jobs exception columns into queryable display
+ * fields (fileName, lineNumber, sql), app-side, so the failed-jobs tool works against ANY cbq
+ * database without provisioning an enrichment view (ADR-0001 / PRD Q9).
+ *
+ * Best-effort parsing: returns blanks rather than throwing on unrecognized input. No I/O.
+ */
+@singleton
+class {
+
+	/**
+	 * Enrich a single failed-job row in place and return it.
+	 *
+	 * @row A struct with raw exception columns (exceptionStackTrace, exceptionDetail,
+	 *      exceptionMessage, exception, ...).
+	 */
+	struct function enrich( required struct row ){
+		var r = arguments.row;
+		var loc = parseLocation( r );
+		r[ "fileName" ]   = loc.fileName;
+		r[ "lineNumber" ] = loc.lineNumber;
+		r[ "sql" ]        = parseSql( r );
+		return r;
+	}
+
+	/**
+	 * Enrich an array of rows.
+	 */
+	array function enrichAll( required array rows ){
+		return arguments.rows.map( ( row ) => enrich( row ) );
+	}
+
+	/**
+	 * Extract the originating file name + line number from the stack trace / detail.
+	 *
+	 * @return struct { fileName, lineNumber }
+	 */
+	struct function parseLocation( required struct row ){
+		var trace = firstNonEmpty( arguments.row, [ "exceptionStackTrace", "exceptionDetail", "exception" ] );
+		var result = { "fileName" : "", "lineNumber" : "" };
+		if ( !len( trace ) ){
+			return result;
+		}
+		// Match patterns like "...(/path/to/File.bx:123)" or "File.cfc:123" or "at File:123"
+		var m = reFind( "([^\s\(/\\]+\.(?:bx|cfc|cfm|java)):(\d+)", trace, 1, true );
+		if ( arrayLen( m.match ) >= 3 && m.pos[ 1 ] > 0 ){
+			result.fileName   = m.match[ 2 ];
+			result.lineNumber = m.match[ 3 ];
+		}
+		return result;
+	}
+
+	/**
+	 * Extract a SQL statement from the exception detail/message when the failure was a DB error.
+	 */
+	string function parseSql( required struct row ){
+		var detail = firstNonEmpty( arguments.row, [ "exceptionDetail", "exceptionMessage", "exception" ] );
+		if ( !len( detail ) ){
+			return "";
+		}
+		var m = reFindNoCase( "(select|insert|update|delete|merge|exec)\b[\s\S]{0,2000}", detail, 1, true );
+		return ( arrayLen( m.match ) && m.pos[ 1 ] > 0 ) ? trim( m.match[ 1 ] ) : "";
+	}
+
+	private string function firstNonEmpty( required struct row, required array keys ){
+		for ( var k in arguments.keys ){
+			if ( structKeyExists( arguments.row, k ) && !isNull( arguments.row[ k ] ) && len( toString( arguments.row[ k ] ) ) ){
+				return toString( arguments.row[ k ] );
+			}
+		}
+		return "";
+	}
+
+}

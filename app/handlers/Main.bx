@@ -12,6 +12,55 @@ class extends="coldbox.system.EventHandler" {
 	 */
 
 	function onAppInit( event, rc, prc ){
+		seedDefaultAdmin();
+		seedDevFixture();
+	}
+
+	/**
+	 * In development, idempotently seed the local dev fixture from .env: a Pusher Broadcast
+	 * Connection and a LINKED FTDIQueue Connection (database + websocket as a paired unit), so the
+	 * deeper views run against live data without manual setup. Failures are logged, never fatal.
+	 */
+	private function seedDevFixture(){
+		if ( getSetting( "environment" ) != "development" ){
+			return;
+		}
+		try {
+			var summary = getInstance( "DevFixtureSeeder" ).seed();
+			if ( summary.created.broadcast || summary.created.connection ){
+				log.info( "Seeded dev fixture (broadcast ##summary.broadcastId##, connection ##summary.connectionId##)" );
+			}
+		} catch ( any e ){
+			savecontent variable="local.dumpOut" {
+				writeDump( var = e, format = "text" );
+			}
+			var logPath = getCanonicalPath( getController().getAppRootPath() & "/../runtime/logs/devfixture-error.log" );
+			fileWrite( logPath, local.dumpOut );
+			log.error( "Dev fixture seed failed: #e.message#", e );
+		}
+	}
+
+	/**
+	 * Easy initial setup: in development, create a default admin (admin/password) the first time
+	 * the app boots against an empty user table. Idempotent — only runs when there are no users.
+	 */
+	private function seedDefaultAdmin(){
+		if ( getSetting( "environment" ) != "development" ){
+			return;
+		}
+		var User = getInstance( "User" );
+		if ( User.count() > 0 ){
+			return;
+		}
+		getInstance( "User" )
+			.setUsername( "admin" )
+			.setFirstName( "Admin" )
+			.setLastName( "User" )
+			.setPassword( "password" )
+			.setRole( "admin" )
+			.setIsActive( true )
+			.save();
+		log.info( "Seeded default admin user (admin/password)" );
 	}
 
 	function onRequestStart( event, rc, prc ){

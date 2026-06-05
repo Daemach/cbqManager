@@ -1,0 +1,54 @@
+/**
+ * PoolParamsInference — infers a Connection's Worker-pool parameters that live only in the
+ * Managed App's config, not the database (PRD Q17). Reservation timeout is inferred from
+ * observed reservation durations; queue priority is NOT inferable from data, so a configured
+ * fallback is always required. Pure given its inputs.
+ */
+@singleton
+class {
+
+	property name="poolDefaults" inject="coldbox:setting:poolDefaults";
+
+	/**
+	 * Infer a reservation timeout (seconds) from observed reservation durations.
+	 * Uses a high percentile with headroom so legitimately long jobs are not mistaken for stuck.
+	 *
+	 * @durations Array of observed (terminalDate - reservedDate) seconds for completed jobs.
+	 * @fallback  Value to use when there is insufficient data.
+	 */
+	numeric function inferTimeout( required array durations, numeric fallback ){
+		var fb = !isNull( arguments.fallback ) ? arguments.fallback : variables.poolDefaults.timeoutSeconds;
+		var clean = arguments.durations.filter( ( d ) => isNumeric( d ) && d > 0 );
+		if ( arrayLen( clean ) < 5 ){
+			return fb;
+		}
+		clean.sort( ( a, b ) => a - b );
+		var p95 = clean[ max( 1, int( arrayLen( clean ) * 0.95 ) ) ];
+		return max( fb, ceiling( p95 * 1.5 ) );
+	}
+
+	/**
+	 * Resolve effective pool params for a Connection: inferred/explicit timeout, plus the
+	 * configured queue-priority and maxAttempts fallbacks (priority is never inferred).
+	 *
+	 * @connection Connection config struct (may carry poolTimeout, poolMaxAttempts, queuePriority).
+	 * @durations  Optional observed durations for timeout inference.
+	 */
+	struct function resolve( required struct connection, array durations = [] ){
+		var c = arguments.connection;
+		var timeout = ( structKeyExists( c, "poolTimeout" ) && isNumeric( c.poolTimeout ) && c.poolTimeout > 0 )
+			? c.poolTimeout
+			: inferTimeout( arguments.durations );
+
+		var maxAttempts = ( structKeyExists( c, "poolMaxAttempts" ) && isNumeric( c.poolMaxAttempts ) && c.poolMaxAttempts > 0 )
+			? c.poolMaxAttempts
+			: variables.poolDefaults.maxAttempts;
+
+		var priority = ( structKeyExists( c, "queuePriority" ) && isArray( c.queuePriority ) && arrayLen( c.queuePriority ) )
+			? c.queuePriority
+			: variables.poolDefaults.queuePriority;
+
+		return { "timeoutSeconds" : timeout, "maxAttempts" : maxAttempts, "queuePriority" : priority };
+	}
+
+}

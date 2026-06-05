@@ -1,0 +1,97 @@
+/**
+ * QueueHealthAnalyzer — pure: computes the six Queue Health buckets per Queue and the "Next Up"
+ * Job a Worker pool would reserve next, by replicating cbq's selection order (CONTEXT.md
+ * "Queue Health", "Next Up", "Orphan"). The headline diagnostic for spotting a starved pool.
+ *
+ * Operates on already-fetched rows so it is fully testable; JobRepository may also push the
+ * same predicates down to SQL for large tables.
+ */
+@singleton
+class {
+
+	property name="classifier" inject="JobStateClassifier";
+
+	/**
+	 * Build per-Queue health buckets from a set of rows.
+	 *
+	 * @rows Array of cbq_jobs row structs.
+	 * @now  Current unix epoch (seconds).
+	 *
+	 * @return array of structs (one per queue) sorted by orphanedBlockers desc, pickableFresh desc.
+	 */
+	array function analyze( required array rows, required numeric now ){
+		var states  = variables.classifier.states();
+		var byQueue = {};
+
+		for ( var row in arguments.rows ){
+			var q = structKeyExists( row, "queue" ) ? row.queue : "default";
+			if ( !structKeyExists( byQueue, q ) ){
+				byQueue[ q ] = blankBucket( q );
+			}
+			var state = variables.classifier.classify( row, arguments.now );
+			if ( state == states.COMPLETED || state == states.FAILED ){
+				continue; // not "open"
+			}
+			byQueue[ q ].openTotal++;
+			switch ( state ){
+				case states.ORPHAN            : byQueue[ q ].orphanedBlockers++;         break;
+				case states.AVAILABLE         : byQueue[ q ].pickableFresh++;            break;
+				case states.RESERVED_TIMEDOUT : byQueue[ q ].pickableReservedTimedout++; break;
+				case states.IN_FLIGHT         : byQueue[ q ].inFlight++;                 break;
+				case states.SCHEDULED         : byQueue[ q ].scheduledFuture++;          break;
+			}
+		}
+
+		return structValues( byQueue ).sort( ( a, b ) => {
+			if ( a.orphanedBlockers != b.orphanedBlockers ) return b.orphanedBlockers - a.orphanedBlockers;
+			return b.pickableFresh - a.pickableFresh;
+		} );
+	}
+
+	/**
+	 * The Job a pool would reserve next: among pickable rows (fresh, reserved-timed-out, or
+	 * orphan candidate), ordered by queue priority then id ascending.
+	 *
+	 * @rows          Array of cbq_jobs row structs.
+	 * @now           Current unix epoch (seconds).
+	 * @queuePriority Ordered array of queue names (highest priority first). Unlisted queues sort last.
+	 *
+	 * @return the row struct, or an empty struct if nothing is pickable.
+	 */
+	struct function nextUp( required array rows, required numeric now, array queuePriority = [] ){
+		var states = variables.classifier.states();
+		var pickable = arguments.rows.filter( ( row ) => {
+			var s = variables.classifier.classify( row, now );
+			return s == states.AVAILABLE || s == states.RESERVED_TIMEDOUT || s == states.ORPHAN;
+		} );
+		if ( !arrayLen( pickable ) ){
+			return {};
+		}
+		var prio = arguments.queuePriority;
+		pickable.sort( ( a, b ) => {
+			var pa = queueRank( a.queue ?: "", prio );
+			var pb = queueRank( b.queue ?: "", prio );
+			if ( pa != pb ) return pa - pb;
+			return ( a.id ?: 0 ) - ( b.id ?: 0 );
+		} );
+		return pickable[ 1 ];
+	}
+
+	private numeric function queueRank( required string queue, required array priority ){
+		var idx = arrayFindNoCase( arguments.priority, arguments.queue );
+		return idx > 0 ? idx : ( arrayLen( arguments.priority ) + 1 );
+	}
+
+	private struct function blankBucket( required string queue ){
+		return {
+			"queue"                    : arguments.queue,
+			"openTotal"                : 0,
+			"orphanedBlockers"         : 0,
+			"pickableFresh"            : 0,
+			"pickableReservedTimedout" : 0,
+			"inFlight"                 : 0,
+			"scheduledFuture"          : 0
+		};
+	}
+
+}

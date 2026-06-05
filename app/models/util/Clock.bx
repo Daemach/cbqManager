@@ -1,0 +1,22 @@
+/**
+ * Clock — single source of "now" as a unix epoch (seconds), matching cbq's date columns.
+ * Injectable so tests can substitute a fixed clock for deterministic boundary-time assertions.
+ */
+@singleton
+class {
+
+	/**
+	 * Current time as unix epoch seconds (UTC).
+	 */
+	numeric function epoch(){
+		return int( createObject( "java", "java.lang.System" ).currentTimeMillis() / 1000 );
+	}
+
+	/**
+	 * Current time as a UTC timestamp (for own-store audit/archive columns).
+	 */
+	function nowUtc(){
+		return dateConvert( "local2utc", now() );
+	}
+
+}

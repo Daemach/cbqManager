@@ -1,0 +1,87 @@
+/**
+ * Harvester — periodically snapshots terminal Jobs and Queue Depth from each Connection into the
+ * local Archive before cbq cleanup deletes them (ADR-0004). Dedups via the Archive high-water
+ * mark. MUST run more frequently than each target's cbq cleanup window.
+ *
+ * Driven by the app Scheduler (see app/config/Scheduler.bx).
+ */
+@singleton
+class {
+
+	property name="qbFactory" inject="QueryBuilderFactory";
+	property name="registry"  inject="ConnectionRegistry";
+	property name="archive"   inject="ArchiveRepository";
+	property name="jobRepo"   inject="JobRepository";
+	property name="clock"     inject="Clock";
+
+	// Max terminal rows to pull per Connection per harvest cycle
+	variables.BATCH_SIZE = 1000;
+
+	/**
+	 * Harvest one Connection: archive new terminal Jobs + capture a Queue Depth sample.
+	 *
+	 * @return struct { archived, queuesSampled }
+	 */
+	struct function harvest( required numeric connectionId ){
+		var conn = registry.resolve( arguments.connectionId );
+		var hw   = archive.highWaterMark( arguments.connectionId );
+
+		var terminal = builder( conn ).from( conn.tableName )
+			.where( "id", ">", hw )
+			.where( ( g ) => g.whereNotNull( "completedDate" ).orWhereNotNull( "failedDate" ) )
+			.orderBy( "id" )
+			.limit( variables.BATCH_SIZE )
+			.get();
+
+		var mapped = terminal.map( ( row ) => toArchiveRow( row ) );
+		var archived = archive.archiveJobs( arguments.connectionId, mapped );
+
+		// Queue Depth sample reuses the same analyzer-backed buckets as Queue Health
+		var buckets = jobRepo.queueHealth( arguments.connectionId );
+		archive.sampleQueueDepth( arguments.connectionId, buckets );
+
+		return { "archived" : archived, "queuesSampled" : arrayLen( buckets ) };
+	}
+
+	/**
+	 * Harvest every active, harvest-enabled Connection.
+	 */
+	array function harvestAll(){
+		return registry.list()
+			.filter( ( c ) => ( c.isActive ?: true ) )
+			.map( ( c ) => {
+				try {
+					return { "connectionId" : c.id, "result" : harvest( c.id ) };
+				} catch ( any e ) {
+					return { "connectionId" : c.id, "error" : e.message };
+				}
+			} );
+	}
+
+	private struct function toArchiveRow( required struct row ){
+		var completed = isNumeric( arguments.row.completedDate ?: "" ) && arguments.row.completedDate > 0;
+		return {
+			"sourceId"          : arguments.row.id,
+			"queue"             : arguments.row.queue ?: "default",
+			"mapping"           : extractMapping( arguments.row.payload ?: "" ),
+			"jobState"          : completed ? "completed" : "failed",
+			"attempts"          : arguments.row.attempts ?: 0,
+			"sourceCreatedDate" : arguments.row.createdDate ?: javacast( "null", "" ),
+			"terminalDate"      : completed ? arguments.row.completedDate : ( arguments.row.failedDate ?: javacast( "null", "" ) ),
+			"payload"           : arguments.row.payload ?: javacast( "null", "" )
+		};
+	}
+
+	private string function extractMapping( required string payload ){
+		if ( len( arguments.payload ) && isJSON( arguments.payload ) ){
+			var m = jsonDeserialize( arguments.payload );
+			return isStruct( m ) ? ( m.mapping ?: "" ) : "";
+		}
+		return "";
+	}
+
+	private function builder( required struct conn ){
+		return variables.qbFactory.forConnection( arguments.conn );
+	}
+
+}

@@ -10,6 +10,10 @@ build/**
 .engine/**
 .cbfs/**
 docker/.db/**
+# cbqManager SQLite own store (keep the folder, ignore the db files)
+resources/db/*.db
+resources/db/*.db-journal
+resources/db/*.db-wal
 
 # Vite
 /public/includes/build/**

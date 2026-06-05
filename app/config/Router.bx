@@ -30,6 +30,55 @@ class {
 		// API Secured Routes
 		get( "/api/whoami", "Echo.whoami" )
 
+		// ---------------------------------------------------------------------
+		// cbqManager API (JWT secured; per-action RBAC + per-Connection scope)
+		// NOTE: routes match in order and short patterns match longer URLs as a
+		// prefix, so MOST-SPECIFIC routes must be registered FIRST and the bare
+		// /api/connections routes LAST.
+		// ---------------------------------------------------------------------
+
+		// Job item actions
+		post(   "/api/connections/:connectionId/jobs/:id/complete",   "Jobs.markComplete" )
+		post(   "/api/connections/:connectionId/jobs/:id/reset",      "Jobs.reset" )
+		post(   "/api/connections/:connectionId/jobs/:id/quarantine", "Jobs.quarantine" )
+		delete( "/api/connections/:connectionId/jobs/:id",            "Jobs.remove" )
+		get(    "/api/connections/:connectionId/jobs/nextup",         "Jobs.nextUp" )
+		get(    "/api/connections/:connectionId/jobs",                "Jobs.index" )
+
+		// Queue-wide control actions
+		post(   "/api/connections/:connectionId/heal",    "Jobs.healOrphans" )
+		post(   "/api/connections/:connectionId/park",    "Jobs.park" )
+		post(   "/api/connections/:connectionId/release", "Jobs.throttledRelease" )
+		post(   "/api/connections/:connectionId/discard", "Jobs.discardStale" )
+
+		// Failed Jobs
+		post(   "/api/connections/:connectionId/failed-jobs/:id/retry",  "FailedJobs.retry" )
+		delete( "/api/connections/:connectionId/failed-jobs/:id",        "FailedJobs.remove" )
+		get(    "/api/connections/:connectionId/failed-jobs",            "FailedJobs.index" )
+
+		// Batches
+		post(   "/api/connections/:connectionId/batches/:batchId/cancel",       "Batches.cancel" )
+		post(   "/api/connections/:connectionId/batches/:batchId/retry-failed", "Batches.retryFailed" )
+		get(    "/api/connections/:connectionId/batches/:batchId/jobs",         "Batches.drilldown" )
+		delete( "/api/connections/:connectionId/batches/:batchId",              "Batches.remove" )
+		get(    "/api/connections/:connectionId/batches",                       "Batches.index" )
+
+		// Queue Health + Archive (scoped to a Connection)
+		get(    "/api/connections/:connectionId/health",  "QueueHealth.index" )
+		get(    "/api/connections/:connectionId/archive", "Archive.index" )
+
+		// Audit (admin)
+		get(    "/api/audit", "Audit.index" )
+
+		// Connection Registry item (after all sub-resources)
+		get(    "/api/connections/:id", "Connections.show" )
+		put(    "/api/connections/:id", "Connections.update" )
+		delete( "/api/connections/:id", "Connections.remove" )
+
+		// Connection Registry collection (bare — must be LAST)
+		get(    "/api/connections", "Connections.index" )
+		post(   "/api/connections", "Connections.create" )
+
 		// @app_routes@
 
 		// Conventions-Based Routing

@@ -1,6 +1,8 @@
+/**
+ * UserService — DB-backed (Quick + bcrypt) against the seeded default admin (admin/password, id 1).
+ * These exercise read/verify paths only (no writes), so they need no test-isolation.
+ */
 class extends="coldbox.system.testing.BaseTestCase" {
-
-	/*********************************** LIFE CYCLE Methods ***********************************/
 
 	function beforeAll(){
 		super.beforeAll();
@@ -10,51 +12,46 @@ class extends="coldbox.system.testing.BaseTestCase" {
 		super.afterAll();
 	}
 
-	/*********************************** BDD SUITES ***********************************/
-
 	function run(){
-		describe( "UserService", () => {
+		describe( "UserService (Quick + bcrypt)", () => {
 			beforeEach( ( currentSpec ) => {
 				setup();
-				model = getInstance( "UserService" );
+				variables.model = getInstance( "UserService" );
 			} );
 
 			it( "can be created", () => {
 				expect( model ).toBeComponent();
 			} );
 
-			it( "can get a valid mock user by id", () => {
+			it( "retrieves the seeded admin by id", () => {
 				var oUser = model.retrieveUserById( 1 );
-				expect( oUser.getId() ).toBe( 1 );
 				expect( oUser.isLoaded() ).toBeTrue();
+				expect( oUser.getUsername() ).toBe( "admin" );
 			} );
 
-			it( "can get a new mock user with invalid id", () => {
-				var oUser = model.retrieveUserById( 100 );
-				expect( oUser.getId() ).toBe( "" );
+			it( "returns an unloaded user for an unknown id", () => {
+				var oUser = model.retrieveUserById( 999999 );
 				expect( oUser.isLoaded() ).toBeFalse();
 			} );
 
-			it( "can get a valid mock user by username", () => {
+			it( "retrieves the seeded admin by username", () => {
 				var oUser = model.retrieveUserByUsername( "admin" );
-				expect( oUser.getId() ).toBe( 1 );
 				expect( oUser.isLoaded() ).toBeTrue();
+				expect( oUser.getRole() ).toBe( "admin" );
 			} );
 
-			it( "can get a new mock user with invalid username", () => {
-				var oUser = model.retrieveUserByUsername( "bogus@admin" );
-				expect( oUser.getId() ).toBe( "" );
+			it( "returns an unloaded user for an unknown username", () => {
+				var oUser = model.retrieveUserByUsername( "nobody@nowhere" );
 				expect( oUser.isLoaded() ).toBeFalse();
 			} );
 
-			it( "can validate valid credentials", () => {
-				var result = model.isValidCredentials( "admin", "admin" );
-				expect( result ).toBeTrue();
+			it( "validates correct credentials via bcrypt", () => {
+				expect( model.isValidCredentials( "admin", "password" ) ).toBeTrue();
 			} );
 
-			it( "can validate invalid credentials", () => {
-				var result = model.isValidCredentials( "badadmin", "dd" );
-				expect( result ).toBeFalse();
+			it( "rejects incorrect credentials", () => {
+				expect( model.isValidCredentials( "admin", "wrong" ) ).toBeFalse();
+				expect( model.isValidCredentials( "nobody", "x" ) ).toBeFalse();
 			} );
 		} );
 	}

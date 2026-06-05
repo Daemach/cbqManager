@@ -1,33 +1,48 @@
 /**
- * The base model test case will use the 'model' annotation as the instantiation path
- * and then create it, prepare it for mocking and then place it in the variables scope as 'model'. It is your
- * responsibility to update the model annotation instantiation path and init your model.
+ * User — Quick ORM entity with bcrypt password hashing. Built via WireBox (Quick entities need
+ * their injected deps), exercising in-memory behavior only (no save / no DB writes).
  */
-@model( "models.User" )
-class extends="coldbox.system.testing.BaseModelTest" {
-
-	/*********************************** LIFE CYCLE Methods ***********************************/
+class extends="coldbox.system.testing.BaseTestCase" {
 
 	function beforeAll(){
 		super.beforeAll();
-
-		// setup the model
-		super.setup();
-
-		// init the model object
-		model.init();
 	}
 
 	function afterAll(){
 		super.afterAll();
 	}
 
-	/*********************************** BDD SUITES ***********************************/
-
 	function run(){
-		describe( "A User", () => {
-			it( "can be created", () => {
+		describe( "A User (Quick entity)", () => {
+			beforeEach( ( currentSpec ) => {
+				setup();
+				variables.model = getInstance( "User" );
+			} );
+
+			it( "can be created via WireBox", () => {
 				expect( model ).toBeComponent();
+			} );
+
+			it( "bcrypt-hashes the password on assignment and verifies it", () => {
+				model.setPassword( "secret123" );
+				expect( model.getPassword() ).notToBe( "secret123" );      // stored as a hash
+				expect( model.isValidPassword( "secret123" ) ).toBeTrue();
+				expect( model.isValidPassword( "nope" ) ).toBeFalse();
+			} );
+
+			it( "surfaces the single role as a roles array", () => {
+				model.setRole( "operator" );
+				expect( model.getRoles() ).toBe( [ "operator" ] );
+			} );
+
+			it( "defaults roles to viewer when unset", () => {
+				expect( model.getRoles() ).toBe( [ "viewer" ] );
+			} );
+
+			it( "never exposes the password in its memento", () => {
+				model.setUsername( "someone" );
+				model.setPassword( "secret123" );
+				expect( model.getMemento() ).notToHaveKey( "password" );
 			} );
 		} );
 	}

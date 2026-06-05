@@ -1,0 +1,36 @@
+/**
+ * This is the module descriptor and entry point for your module in the runtime.
+ * The unique name of the moduel is the name of the directory on the modules folder.
+ * A BoxLang mapping will be created for you with the name of the module.
+ *
+ * A module can have the following folders that will be automatically registered:
+ * + bifs - Custom BIFs that will be registered into the runtime
+ * + interceptors - Custom interceptors that will be registered into the runtime via the configure() method
+ * + libs - Custom java libraries that your module leverages
+ * + tags - Custom tags that will be registered into the runtime
+ *
+ * Every module will have its own classloader that will be used to load the module libs and dependencies.
+ */
+class {
+
+	// Injections
+	property name="moduleRecord";
+	property name="boxRuntime";
+	property name="log";
+
+	// Module Properties
+	this.version = "1.2.0+5";
+	this.mapping = "sqlite";
+	this.author = "Eric Peterson";
+	this.description = "SQLite DB Driver for BoxLang";
+	this.webURL = "https://www.ortussolutions.com";
+	this.enabled = true;
+	this.dependencies = [];
+
+	/**
+	 * This method is called when the module is loaded into the runtime.
+	 * You can use this method to register custom tags, bifs, and interceptors.
+	 */
+	function configure(){}
+
+}

@@ -1,0 +1,59 @@
+/**
+ * MementoPayloadBuilder — pure: turns a Failed Job's Memento + Mapping into the cbq_jobs insert
+ * row used for Retry (ADR-0002). This is the contract that keeps direct-DB Retry compatible
+ * with cbq's payload convention: cbq stores `payload = jsonSerialize( job.getMemento() )` and a
+ * Worker deserializes it via `wirebox.getInstance( payload.mapping )`. So a valid retry row is
+ * simply the Memento JSON re-inserted, with the mapping key guaranteed present.
+ *
+ * No I/O. Testable by asserting the produced struct/payload shape.
+ */
+@singleton
+class {
+
+	/**
+	 * Build a fresh cbq_jobs insert row from a Failed Job.
+	 *
+	 * @failedJob A struct with at least `memento` (JSON) and `mapping`; optionally `queue`.
+	 * @now       Current unix epoch (seconds).
+	 * @queue     Optional override queue; defaults to the failed job's queue or "default".
+	 */
+	struct function buildRetryRow( required struct failedJob, required numeric now, string queue ){
+		var payload = normalizePayload( arguments.failedJob );
+		var targetQueue = !isNull( arguments.queue ) && len( arguments.queue )
+			? arguments.queue
+			: ( structKeyExists( arguments.failedJob, "queue" ) && len( arguments.failedJob.queue ) ? arguments.failedJob.queue : "default" );
+
+		return {
+			"queue"         : targetQueue,
+			"payload"       : payload,
+			"attempts"      : 0,
+			"availableDate" : arguments.now,
+			"createdDate"   : arguments.now,
+			// reservation/terminal columns intentionally left for DB defaults / null
+			"reservedDate"  : javacast( "null", "" ),
+			"reservedBy"    : javacast( "null", "" ),
+			"completedDate" : javacast( "null", "" ),
+			"failedDate"    : javacast( "null", "" )
+		};
+	}
+
+	/**
+	 * Ensure the payload is valid JSON carrying its `mapping` key. If the stored memento lacks
+	 * mapping, graft it from the Failed Job's `mapping` column.
+	 */
+	string function normalizePayload( required struct failedJob ){
+		var raw = structKeyExists( arguments.failedJob, "memento" ) ? arguments.failedJob.memento : "";
+		var memento = ( len( raw ) && isJSON( raw ) ) ? jsonDeserialize( raw ) : {};
+
+		if ( !isStruct( memento ) ){
+			memento = {};
+		}
+		if ( !structKeyExists( memento, "mapping" ) || !len( toString( memento.mapping ) ) ){
+			if ( structKeyExists( arguments.failedJob, "mapping" ) && len( arguments.failedJob.mapping ) ){
+				memento[ "mapping" ] = arguments.failedJob.mapping;
+			}
+		}
+		return jsonSerialize( memento );
+	}
+
+}

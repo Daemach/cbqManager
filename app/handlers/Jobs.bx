@@ -1,0 +1,52 @@
+/**
+ * Jobs — browse a Connection's cbq_jobs and run guarded control actions (ADR-0001, Q10).
+ * Reads need view scope; mutations need control scope on the Connection. All mutations audited.
+ */
+class extends="BaseApiHandler" {
+
+	property name="jobRepo" inject="JobRepository";
+
+	// ---- reads ----
+
+	function index( event, rc, prc ){
+		if ( !secure( event, "job.list", rc.connectionId ) ) return;
+		var filters = {
+			"queue"    : rc.queue    ?: "",
+			"openOnly" : rc.openOnly ?: false,
+			"mapping"  : rc.mapping  ?: ""
+		};
+		event.getResponse().setDataWithPagination( jobRepo.list( rc.connectionId, filters, rc.page ?: 1, rc.maxRows ?: 25 ) );
+	}
+
+	function nextUp( event, rc, prc ){
+		if ( !secure( event, "job.nextup", rc.connectionId ) ) return;
+		var priority = ( !isNull( rc.queuePriority ) && isJSON( rc.queuePriority ) ) ? jsonDeserialize( rc.queuePriority ) : [];
+		event.getResponse().setData( jobRepo.nextUp( rc.connectionId, priority ) );
+	}
+
+	// ---- control actions (return affected row count) ----
+
+	function markComplete( event, rc, prc ){ act( event, rc, "job.complete",   () => jobRepo.markComplete( rc.connectionId, rc.id ),   { targetType : "job", targetId : rc.id } ); }
+	function reset( event, rc, prc ){        act( event, rc, "job.reset",      () => jobRepo.reset( rc.connectionId, rc.id ),          { targetType : "job", targetId : rc.id } ); }
+	function quarantine( event, rc, prc ){   act( event, rc, "job.quarantine", () => jobRepo.quarantine( rc.connectionId, rc.id, rc.toQueue ?: "quarantine" ), { targetType : "job", targetId : rc.id } ); }
+	function remove( event, rc, prc ){       act( event, rc, "job.delete",     () => jobRepo.deleteJob( rc.connectionId, rc.id ),      { targetType : "job", targetId : rc.id } ); }
+	function healOrphans( event, rc, prc ){  act( event, rc, "job.heal",       () => jobRepo.healOrphans( rc.connectionId, rc.queue ?: "" ),    { targetType : "queue", targetId : rc.queue ?: "" } ); }
+	function park( event, rc, prc ){         act( event, rc, "job.park",       () => jobRepo.park( rc.connectionId, rc.queue ?: "" ),          { targetType : "queue", targetId : rc.queue ?: "" } ); }
+	function throttledRelease( event, rc, prc ){ act( event, rc, "job.release", () => jobRepo.throttledRelease( rc.connectionId, rc.perWindow ?: 20, rc.startIn ?: 30, rc.queue ?: "" ), { targetType : "queue", targetId : rc.queue ?: "" } ); }
+	function discardStale( event, rc, prc ){ act( event, rc, "job.discard",    () => jobRepo.discardStale( rc.connectionId, rc.queue, rc.olderThanEpoch ), { targetType : "queue", targetId : rc.queue ?: "" } ); }
+
+	/**
+	 * Shared control-action wrapper: authorize -> run -> audit -> respond with affected count.
+	 */
+	private function act( required any event, required struct rc, required string action, required any fn, struct meta = {} ){
+		if ( !secure( arguments.event, arguments.action, arguments.rc.connectionId ) ) return;
+		var affected = arguments.fn();
+		arguments.meta[ "connectionId" ] = arguments.rc.connectionId;
+		arguments.meta[ "result" ]       = "affected=#affected#";
+		audit( arguments.action, arguments.meta );
+		arguments.event.getResponse()
+			.setData( { "affected" : affected } )
+			.addMessage( affected ? "#affected# row(s) affected" : "No rows affected (state changed) — refresh" );
+	}
+
+}

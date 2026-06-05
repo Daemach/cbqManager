@@ -1,0 +1,202 @@
+/**
+ * ConnectionRegistry — CRUD over Connections and Broadcast Connections, persisted in cbqManager's
+ * own store with secret fields encrypted via CredentialCipher (ADR-0003). `resolve()` returns a
+ * usable config including the decrypted runtime datasource struct — that result is for internal
+ * use only and must never be serialized back to a client.
+ */
+@singleton
+class {
+
+	property name="qbFactory" inject="QueryBuilderFactory";
+	property name="cipher"    inject="CredentialCipher";
+	property name="clock"     inject="Clock";
+
+	// ---- Connections -------------------------------------------------------
+
+	/**
+	 * List Connections WITHOUT secrets (safe for the client).
+	 */
+	array function list(){
+		return own()
+			.from( "cbqm_connections" )
+			.select( [ "id", "name", "environment", "grammar", "tableName", "isActive", "broadcastConnectionId", "channel", "createdDate" ] )
+			.orderBy( "name" )
+			.get();
+	}
+
+	/**
+	 * Get a Connection's stored row (still encrypted) by id.
+	 */
+	struct function get( required numeric id ){
+		var row = own().from( "cbqm_connections" ).where( "id", arguments.id ).first();
+		return isNull( row ) ? {} : row;
+	}
+
+	/**
+	 * Create a Connection. Expects `secrets` = { username, password }; the rest are columns.
+	 *
+	 * @data Struct of connection fields plus a `secrets` struct.
+	 *
+	 * @return the new id.
+	 */
+	numeric function create( required struct data ){
+		var row = sanitize( arguments.data );
+		var env = cipher.encryptStruct( arguments.data.secrets ?: {} );
+		row[ "secrets_enc" ] = env.value;
+		row[ "cipherIv" ]    = env.iv;
+		row[ "cipherAlg" ]   = env.alg;
+		row[ "createdDate" ] = clock.nowUtc();
+		var result = own().from( "cbqm_connections" ).insert( row );
+		return result.result.generatedKey ?: 0;
+	}
+
+	/**
+	 * Update a Connection. Re-encrypts secrets only when a `secrets` struct is supplied.
+	 */
+	void function update( required numeric id, required struct data ){
+		var row = sanitize( arguments.data );
+		if ( structKeyExists( arguments.data, "secrets" ) ){
+			var env = cipher.encryptStruct( arguments.data.secrets );
+			row[ "secrets_enc" ] = env.value;
+			row[ "cipherIv" ]    = env.iv;
+			row[ "cipherAlg" ]   = env.alg;
+		}
+		row[ "modifiedDate" ] = clock.nowUtc();
+		own().from( "cbqm_connections" ).where( "id", arguments.id ).update( row );
+	}
+
+	void function remove( required numeric id ){
+		own().from( "cbqm_connections" ).where( "id", arguments.id ).delete();
+	}
+
+	/**
+	 * Resolve a Connection to a usable config: decrypts secrets and assembles the runtime
+	 * datasource struct. INTERNAL ONLY — never return this to a client.
+	 */
+	struct function resolve( required numeric id ){
+		var row = get( arguments.id );
+		if ( structIsEmpty( row ) ){
+			throw( type = "cbqm.ConnectionNotFound", message = "No Connection [#arguments.id#]" );
+		}
+		var secrets = len( row.secrets_enc ?: "" )
+			? cipher.decryptStruct( row.secrets_enc, row.cipherIv, row.cipherAlg )
+			: {};
+		row[ "datasource" ] = {
+			// `generic` tells BoxLang to use the supplied JDBC driver class + connection string
+			// directly (verified against the live SQL Server target). The driver jar (e.g. bx-mssql)
+			// must be loaded by the runtime for `class` to resolve.
+			"driver"           : "generic",
+			"class"            : row.datasourceClass,
+			"connectionString" : row.connectionString,
+			"username"         : secrets.username ?: "",
+			"password"         : secrets.password ?: ""
+		};
+		return row;
+	}
+
+	// ---- Broadcast Connections --------------------------------------------
+
+	/**
+	 * List Broadcast Connections WITHOUT secrets.
+	 */
+	array function listBroadcast(){
+		return own()
+			.from( "cbqm_broadcast_connections" )
+			.select( [ "id", "name", "transport", "pusherKey", "pusherCluster", "socketboxUrl" ] )
+			.orderBy( "name" )
+			.get();
+	}
+
+	/**
+	 * Create a Broadcast Connection. Expects `secrets` = { pusherAppId, pusherSecret } or
+	 * { socketboxAuth }; the rest are columns. Mirrors create(): secrets are encrypted as one blob.
+	 *
+	 * @return the new id.
+	 */
+	numeric function createBroadcast( required struct data ){
+		var row = sanitizeBroadcast( arguments.data );
+		var env = cipher.encryptStruct( arguments.data.secrets ?: {} );
+		row[ "secrets_enc" ] = env.value;
+		row[ "cipherIv" ]    = env.iv;
+		row[ "cipherAlg" ]   = env.alg;
+		row[ "createdDate" ] = clock.nowUtc();
+		var result = own().from( "cbqm_broadcast_connections" ).insert( row );
+		return result.result.generatedKey ?: 0;
+	}
+
+	/**
+	 * Resolve a Broadcast Connection to its config WITH decrypted secrets under `secrets`.
+	 * INTERNAL ONLY — never return this to a client (the public keys are safe; the secret is not).
+	 */
+	struct function resolveBroadcast( required numeric id ){
+		var row = own().from( "cbqm_broadcast_connections" ).where( "id", arguments.id ).first();
+		if ( isNull( row ) || structIsEmpty( row ) ){
+			throw( type = "cbqm.BroadcastNotFound", message = "No Broadcast Connection [#arguments.id#]" );
+		}
+		row[ "secrets" ] = len( row.secrets_enc ?: "" )
+			? cipher.decryptStruct( row.secrets_enc, row.cipherIv, row.cipherAlg )
+			: {};
+		return row;
+	}
+
+	void function removeBroadcast( required numeric id ){
+		own().from( "cbqm_broadcast_connections" ).where( "id", arguments.id ).delete();
+	}
+
+	// ---- lookups (idempotent seeding / name resolution) --------------------
+
+	/**
+	 * Find a Connection's stored row by unique name, or {} if none.
+	 */
+	struct function findByName( required string name ){
+		var row = own().from( "cbqm_connections" ).where( "name", arguments.name ).first();
+		return isNull( row ) ? {} : row;
+	}
+
+	/**
+	 * Find a Broadcast Connection's stored row by unique name, or {} if none.
+	 */
+	struct function findBroadcastByName( required string name ){
+		var row = own().from( "cbqm_broadcast_connections" ).where( "name", arguments.name ).first();
+		return isNull( row ) ? {} : row;
+	}
+
+	// ---- helpers -----------------------------------------------------------
+
+	/**
+	 * Strip non-column / secret keys before a write.
+	 */
+	private struct function sanitize( required struct data ){
+		var allowed = [
+			"name", "environment", "grammar", "tableName", "datasourceClass", "connectionString",
+			"broadcastConnectionId", "channel", "events", "poolTimeout", "poolMaxAttempts",
+			"queuePriority", "autoRetry", "harvestEnabled", "harvestInterval", "isActive"
+		];
+		var row = {};
+		for ( var k in allowed ){
+			if ( structKeyExists( arguments.data, k ) ){
+				row[ k ] = isArray( arguments.data[ k ] ) ? jsonSerialize( arguments.data[ k ] ) : arguments.data[ k ];
+			}
+		}
+		return row;
+	}
+
+	/**
+	 * Strip non-column / secret keys before a Broadcast Connection write.
+	 */
+	private struct function sanitizeBroadcast( required struct data ){
+		var allowed = [ "name", "transport", "pusherKey", "pusherCluster", "socketboxUrl" ];
+		var row = {};
+		for ( var k in allowed ){
+			if ( structKeyExists( arguments.data, k ) ){
+				row[ k ] = arguments.data[ k ];
+			}
+		}
+		return row;
+	}
+
+	private function own(){
+		return variables.qbFactory.forOwnStore();
+	}
+
+}

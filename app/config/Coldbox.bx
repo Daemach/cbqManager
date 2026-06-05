@@ -59,8 +59,27 @@ class {
 		 * --------------------------------------------------------------------------
 		 * Custom Settings
 		 * --------------------------------------------------------------------------
+		 * cbqManager runtime settings. Secrets come from the environment only.
 		 */
-		variables.settings = {}
+		variables.settings = {
+			// Own store datasource name (see /public/Application.bx)
+			"cbqmDatasource"  : "cbqManager",
+			// Credential vault (ADR-0003) — key lives ONLY in the environment
+			"encryptionKey"   : getSystemSetting( "CBQM_ENCRYPTION_KEY", "" ),
+			// Harvester / Archive (ADR-0004)
+			"harvest" : {
+				"enabled"          : getSystemSetting( "CBQM_HARVEST_ENABLED", true ),
+				"intervalSeconds"  : getSystemSetting( "CBQM_HARVEST_INTERVAL", 60 ),
+				"retentionDays"    : getSystemSetting( "CBQM_ARCHIVE_RETENTION_DAYS", 180 )
+			},
+			// Default per-Connection Worker-pool fallbacks (Q17). Timeout is inferred from
+			// observed data; queue priority is NOT inferable, so a configured fallback is used.
+			"poolDefaults" : {
+				"timeoutSeconds" : 60,
+				"maxAttempts"    : 3,
+				"queuePriority"  : []
+			}
+		}
 
 		/**
 		 * --------------------------------------------------------------------------
@@ -142,7 +161,13 @@ class {
 		 *
 		 * }
 		 */
-		variables.moduleSettings = {}
+		variables.moduleSettings = {
+			// Modern template: app code is under the /app mapping, so cbq's queue config file
+			// resolves as app.config.cbq (not the flat-template default of config.cbq).
+			"cbq" : { "configPath" : "app.config.cbq" },
+			// Quick ORM (own store = SQLite) — grammar for the User entity.
+			"quick" : { "defaultGrammar" : "SQLiteGrammar@qb" }
+		}
 
 		/**
 		 * --------------------------------------------------------------------------

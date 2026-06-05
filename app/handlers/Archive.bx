@@ -1,0 +1,14 @@
+/**
+ * Archive — long-memory job history from cbqManager's own store (ADR-0004), filterable by Queue.
+ */
+class extends="BaseApiHandler" {
+
+	property name="archive" inject="ArchiveRepository";
+
+	function index( event, rc, prc ){
+		if ( !secure( event, "archive.list", rc.connectionId ) ) return;
+		var filters = { "queue" : rc.queue ?: "", "jobState" : rc.jobState ?: "" };
+		event.getResponse().setDataWithPagination( archive.history( rc.connectionId, filters, rc.page ?: 1, rc.maxRows ?: 50 ) );
+	}
+
+}

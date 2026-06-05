@@ -1,0 +1,71 @@
+/**
+ * FailedJobRepository — reads the Managed App's cbq_failed_jobs (enriched app-side) and performs
+ * Retry via Memento insert (ADR-0002, Q9). Retry never needs the Job class.
+ */
+@singleton
+class {
+
+	property name="qbFactory"      inject="QueryBuilderFactory";
+	property name="registry"       inject="ConnectionRegistry";
+	property name="enricher"       inject="FailedJobEnricher";
+	property name="payloadBuilder" inject="MementoPayloadBuilder";
+	property name="jobRepo"        inject="JobRepository";
+	property name="clock"          inject="Clock";
+
+	variables.TABLE = "cbq_failed_jobs";
+
+	/**
+	 * Paginated, filtered, enriched list of Failed Jobs.
+	 */
+	struct function list( required numeric connectionId, struct filters = {}, numeric page = 1, numeric maxRows = 25 ){
+		var conn = registry.resolve( arguments.connectionId );
+		var q    = builder( conn ).from( variables.TABLE );
+
+		if ( structKeyExists( arguments.filters, "filter" ) && len( arguments.filters.filter ) ){
+			var term = arguments.filters.filter;
+			q.where( ( w ) => {
+				w.orWhereLike( "mapping", "%#term#%" )
+				 .orWhereLike( "exceptionType", "%#term#%" )
+				 .orWhereLike( "exceptionMessage", "%#term#%" )
+				 .orWhereLike( "queue", "%#term#%" )
+				 .orWhereLike( "connection", "%#term#%" );
+			} );
+		}
+
+		var data = q.orderBy( "failedDate", "desc" ).paginate( arguments.page, arguments.maxRows );
+		data.results = enricher.enrichAll( data.results );
+		return data;
+	}
+
+	/**
+	 * Retry a Failed Job by re-queueing its Memento (ADR-0002).
+	 *
+	 * @deleteAfter Also remove the cbq_failed_jobs row when true (retry-and-delete).
+	 *
+	 * @return rows inserted into cbq_jobs (1 on success, 0 if the failed job vanished).
+	 */
+	numeric function retry( required numeric connectionId, required numeric id, boolean deleteAfter = false ){
+		var conn   = registry.resolve( arguments.connectionId );
+		var failed = builder( conn ).from( variables.TABLE ).where( "id", arguments.id ).first();
+		if ( isNull( failed ) || structIsEmpty( failed ) ){
+			return 0;
+		}
+		var row      = payloadBuilder.buildRetryRow( failed, clock.epoch() );
+		var inserted = jobRepo.insertRow( arguments.connectionId, row );
+		if ( arguments.deleteAfter && inserted ){
+			deleteFailed( arguments.connectionId, arguments.id );
+		}
+		return inserted;
+	}
+
+	numeric function deleteFailed( required numeric connectionId, required numeric id ){
+		var conn = registry.resolve( arguments.connectionId );
+		var r = builder( conn ).from( variables.TABLE ).where( "id", arguments.id ).delete();
+		return ( isStruct( r ) && structKeyExists( r, "result" ) ) ? ( r.result.recordCount ?: 0 ) : 0;
+	}
+
+	private function builder( required struct conn ){
+		return variables.qbFactory.forConnection( arguments.conn );
+	}
+
+}

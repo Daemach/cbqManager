@@ -1,0 +1,33 @@
+{
+  "name": "cbqmanager-frontend",
+  "version": "1.0.0",
+  "description": "cbqManager SPA — Vite + Vue 3 + Quasar console over the JWT REST API",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test:e2e": "playwright test",
+    "test:e2e:capture": "cross-env PW_CAPTURE=1 playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:report": "playwright show-report"
+  },
+  "dependencies": {
+    "@quasar/extras": "^1.16.0",
+    "pinia": "^2.1.0",
+    "pusher-js": "^8.4.0",
+    "quasar": "^2.14.0",
+    "vue": "^3.4.0",
+    "vue-router": "^4.3.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.60.0",
+    "@quasar/vite-plugin": "^1.6.0",
+    "@vitejs/plugin-vue": "^5.0.0",
+    "cross-env": "^10.1.0",
+    "dotenv": "^17.4.2",
+    "sass": "^1.70.0",
+    "vite": "^5.1.0"
+  }
+}

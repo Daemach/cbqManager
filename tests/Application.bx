@@ -29,6 +29,16 @@ class {
 	this.mappings[ "/tests" ]   = _testsRoot
 
 	/**
+	 * cbqManager own-store datasource for the test context (the /tests Application is separate
+	 * from /public, so it needs its own definition). Same SQLite store the app + migrations use.
+	 */
+	this.datasources[ "cbqManager" ] = {
+		"driver"   : getSystemSetting( "CBQM_DB_DRIVER", "sqlite" ),
+		"database" : replace( _appRoot & "resources/db/cbqmanager.db", "\", "/", "all" )
+	}
+	this.datasource = "cbqManager"
+
+	/**
 	 * Fires on every test request. It builds a Virtual ColdBox application for you
 	 *
 	 * @targetPage The requested page
