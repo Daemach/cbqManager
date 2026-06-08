@@ -66,6 +66,10 @@ before any push.
 - Front end: `vitest` for pure modules (install with `yarn --cwd frontend add -D vitest` if missing),
   Playwright for behavior — `yarn --cwd frontend test:e2e`.
 - Every defect you hit becomes a regression test. Loop fix → retest until ALL suites are green.
+- **Add tests for edge cases as you find them.** Whenever a slice (or a bug) surfaces a boundary —
+  empty/zero rows, pagination boundaries, leaked/duplicate data, null vs empty string, concurrent
+  writes, permission scope, deep links — capture it as a test in the same iteration so the edge
+  can never silently regress.
 
 ### 4. Evaluate (the UX / architecture pass)
 - UI slice: run the human-like walkthrough with video — `yarn --cwd frontend test:e2e:capture`
