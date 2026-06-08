@@ -23,10 +23,22 @@
       <template #top-right>
         <q-input v-model="filter" dense outlined debounce="300" placeholder="Filter" clearable />
       </template>
+      <template #body-cell-failedDate="props">
+        <q-td :props="props" class="text-no-wrap" data-test="failed-when">
+          <TimeCell :value="props.row.hrFailedDate || props.row.failedDate" />
+        </q-td>
+      </template>
       <template #body-cell-queue="props">
         <q-td :props="props">
           <a v-if="props.value" class="queue-drill" :data-test="`watch-${props.value}`" @click="watchQueue(props.value)">{{ props.value }}</a>
           <span v-else class="text-grey-6">—</span>
+        </q-td>
+      </template>
+      <template #body-cell-payload="props">
+        <q-td :props="props">
+          <q-btn dense flat round size="sm" icon="data_object" :data-test="`payload-${props.row.id}`" @click="showPayload(props.row)">
+            <q-tooltip>View payload</q-tooltip>
+          </q-btn>
         </q-td>
       </template>
       <template #body-cell-actions="props">
@@ -36,6 +48,8 @@
         </q-td>
       </template>
     </q-table>
+
+    <PayloadDialog v-model="payloadOpen" :raw="payloadRaw" :title="payloadTitle" />
   </q-page>
 </template>
 
@@ -44,10 +58,22 @@ import { ref, onMounted } from 'vue'
 import { useQuasar } from 'quasar'
 import { api } from '@/services/api'
 import { useRealtimeStore } from '@/stores/realtime'
+import PayloadDialog from '@/components/PayloadDialog.vue'
+import TimeCell from '@/components/TimeCell.vue'
 
 const props = defineProps({ connectionId: { type: [String, Number], required: true } })
 const $q = useQuasar()
 const realtime = useRealtimeStore()
+
+// Payload dialog (issue #23 part B): /failed-jobs ships the re-queueable payload under `memento`.
+const payloadOpen = ref(false)
+const payloadRaw = ref('')
+const payloadTitle = ref('Payload')
+function showPayload(row) {
+  payloadRaw.value = row.memento || row.payload || ''
+  payloadTitle.value = `Failed job ${row.id} payload`
+  payloadOpen.value = true
+}
 
 // Clicking a queue cell drills the Live Monitor dock down to that queue for this context (PRD-0002 #18).
 function watchQueue(q) {
@@ -68,6 +94,7 @@ const columns = [
   { name: 'mapping', label: 'Job', field: 'mapping', align: 'left' },
   { name: 'fileName', label: 'File:Line', field: (r) => `${r.fileName || ''}:${r.lineNumber || ''}`, align: 'left' },
   { name: 'exceptionMessage', label: 'Error', field: 'exceptionMessage', align: 'left' },
+  { name: 'payload', label: 'Payload', field: 'memento', align: 'center' },
   { name: 'actions', label: 'Actions', field: 'id', align: 'right' }
 ]
 

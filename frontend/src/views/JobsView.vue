@@ -29,6 +29,34 @@
           <span v-else class="text-grey-6">—</span>
         </q-td>
       </template>
+      <template #body-cell-created="props">
+        <q-td :props="props" class="text-no-wrap" data-test="job-created">
+          <TimeCell :value="props.row.hrCreatedDate" />
+        </q-td>
+      </template>
+      <template #body-cell-reserved="props">
+        <q-td :props="props" class="text-no-wrap" data-test="job-reserved">
+          <TimeCell :value="props.row.hrReservedDate" />
+        </q-td>
+      </template>
+      <template #body-cell-done="props">
+        <q-td :props="props" class="text-no-wrap" data-test="job-done">
+          <TimeCell :value="props.row.hrFailedDate || props.row.hrCompletedDate" />
+        </q-td>
+      </template>
+      <template #body-cell-elapsed="props">
+        <q-td :props="props" class="text-no-wrap" data-test="job-elapsed">
+          <span v-if="fmtElapsed(props.row)">{{ fmtElapsed(props.row) }}</span>
+          <span v-else class="text-grey-6">—</span>
+        </q-td>
+      </template>
+      <template #body-cell-payload="props">
+        <q-td :props="props">
+          <q-btn dense flat round size="sm" icon="data_object" :data-test="`payload-${props.row.id}`" @click="showPayload(props.row)">
+            <q-tooltip>View payload</q-tooltip>
+          </q-btn>
+        </q-td>
+      </template>
       <template #body-cell-actions="props">
         <q-td :props="props" class="q-gutter-xs">
           <q-btn dense size="sm" icon="check" @click="act('jobComplete', props.row.id)" />
@@ -38,6 +66,8 @@
         </q-td>
       </template>
     </q-table>
+
+    <PayloadDialog v-model="payloadOpen" :raw="payloadRaw" :title="payloadTitle" />
   </q-page>
 </template>
 
@@ -46,10 +76,28 @@ import { ref, onMounted } from 'vue'
 import { useQuasar } from 'quasar'
 import { api } from '@/services/api'
 import { useRealtimeStore } from '@/stores/realtime'
+import { elapsed as fmtElapsedValue } from '@/services/timeFormat.js'
+import PayloadDialog from '@/components/PayloadDialog.vue'
+import TimeCell from '@/components/TimeCell.vue'
 
 const props = defineProps({ connectionId: { type: [String, Number], required: true } })
 const $q = useQuasar()
 const realtime = useRealtimeStore()
+
+// Payload dialog (issue #23 part B): /jobs ships the payload as a JSON string under `payload`.
+const payloadOpen = ref(false)
+const payloadRaw = ref('')
+const payloadTitle = ref('Payload')
+function showPayload(row) {
+  payloadRaw.value = row.payload || ''
+  payloadTitle.value = `Job ${row.id} payload`
+  payloadOpen.value = true
+}
+
+// elapsed/totalTime (issue #23 part C): prefer the live elapsed, fall back to totalTime.
+function fmtElapsed(row) {
+  return fmtElapsedValue(row.elapsed) || fmtElapsedValue(row.totalTime)
+}
 
 // Clicking a queue cell drills the Live Monitor dock down to that queue for this context (PRD-0002 #18).
 function watchQueue(q) {
@@ -70,6 +118,11 @@ const columns = [
   { name: 'queue', label: 'Queue', field: 'queue', align: 'left' },
   { name: 'state', label: 'State', field: 'state', align: 'left' },
   { name: 'attempts', label: 'Attempts', field: 'attempts', align: 'right' },
+  { name: 'created', label: 'Created', field: 'hrCreatedDate', align: 'left' },
+  { name: 'reserved', label: 'Reserved', field: 'hrReservedDate', align: 'left' },
+  { name: 'done', label: 'Completed/Failed', field: 'hrCompletedDate', align: 'left' },
+  { name: 'elapsed', label: 'Elapsed', field: 'elapsed', align: 'left' },
+  { name: 'payload', label: 'Payload', field: 'payload', align: 'center' },
   { name: 'actions', label: 'Actions', field: 'id', align: 'right' }
 ]
 

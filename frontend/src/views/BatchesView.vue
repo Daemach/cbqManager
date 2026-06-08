@@ -18,6 +18,29 @@
       dense flat bordered
       data-test="batches-table"
     >
+      <template #body-cell-createdDate="props">
+        <q-td :props="props" class="text-no-wrap" data-test="batch-created">
+          <TimeCell :value="props.row.createdDate" />
+        </q-td>
+      </template>
+      <template #body-cell-completedDate="props">
+        <q-td :props="props" class="text-no-wrap" data-test="batch-completed">
+          <TimeCell :value="props.row.completedDate" />
+        </q-td>
+      </template>
+      <template #body-cell-elapsed="props">
+        <q-td :props="props" class="text-no-wrap" data-test="batch-elapsed">
+          <span v-if="batchElapsed(props.row)">{{ batchElapsed(props.row) }}</span>
+          <span v-else class="text-grey-6">—</span>
+        </q-td>
+      </template>
+      <template #body-cell-payload="props">
+        <q-td :props="props">
+          <q-btn dense flat round size="sm" icon="data_object" :data-test="`payload-${props.row.id}`" @click="showPayload(props.row)">
+            <q-tooltip>View options</q-tooltip>
+          </q-btn>
+        </q-td>
+      </template>
       <template #body-cell-actions="props">
         <q-td :props="props" class="q-gutter-xs">
           <q-btn dense size="sm" color="negative" label="Cancel" @click="cancel(props.row.id)" />
@@ -25,6 +48,8 @@
         </q-td>
       </template>
     </q-table>
+
+    <PayloadDialog v-model="payloadOpen" :raw="payloadRaw" :title="payloadTitle" />
   </q-page>
 </template>
 
@@ -32,11 +57,32 @@
 import { ref, onMounted } from 'vue'
 import { useQuasar } from 'quasar'
 import { api } from '@/services/api'
+import { toDate, formatDurationSeconds } from '@/services/timeFormat.js'
+import PayloadDialog from '@/components/PayloadDialog.vue'
+import TimeCell from '@/components/TimeCell.vue'
 
 const props = defineProps({ connectionId: { type: [String, Number], required: true } })
 const $q = useQuasar()
 const rows = ref([])
 const loading = ref(false)
+
+// Payload dialog (issue #23 part B): /batches ships its config blob under `options`.
+const payloadOpen = ref(false)
+const payloadRaw = ref('')
+const payloadTitle = ref('Batch options')
+function showPayload(row) {
+  payloadRaw.value = row.options || ''
+  payloadTitle.value = `Batch ${row.name || row.id} options`
+  payloadOpen.value = true
+}
+
+// Batches ship raw-epoch created/completed but no `elapsed`; derive it when both ends are present.
+function batchElapsed(row) {
+  const start = toDate(row.createdDate)
+  const end = toDate(row.completedDate)
+  if (!start || !end) return ''
+  return formatDurationSeconds((end.getTime() - start.getTime()) / 1000)
+}
 // Recent-first house style (PRD-0002): default sort createdDate DESC so the newest Batch is the first
 // visible row — agreeing with BatchRepository.list's ORDER BY createdDate DESC. Batches load as one
 // client-side set (small admin list), so q-table's sort controls re-order all rows here.
@@ -44,9 +90,12 @@ const pagination = ref({ page: 1, rowsPerPage: 0, sortBy: 'createdDate', descend
 const columns = [
   { name: 'name', label: 'Name', field: 'name', align: 'left', sortable: true },
   { name: 'createdDate', label: 'Created', field: 'createdDate', align: 'left', sortable: true },
+  { name: 'completedDate', label: 'Completed', field: 'completedDate', align: 'left', sortable: true },
+  { name: 'elapsed', label: 'Elapsed', field: 'completedDate', align: 'left' },
   { name: 'totalJobs', label: 'Total', field: 'totalJobs', align: 'right', sortable: true },
   { name: 'pendingJobs', label: 'Pending', field: 'pendingJobs', align: 'right', sortable: true },
   { name: 'failedJobs', label: 'Failed', field: 'failedJobs', align: 'right', sortable: true },
+  { name: 'payload', label: 'Options', field: 'options', align: 'center' },
   { name: 'actions', label: 'Actions', field: 'id', align: 'right' }
 ]
 

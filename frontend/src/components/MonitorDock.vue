@@ -121,8 +121,22 @@
       </div>
 
       <!-- event feed -->
+      <!--
+        Message-first feed (issue #23 part A): Message is the primary, widest column (flexes to fill);
+        Time/Queue/State/Instance/Mapping/Job are tightened to narrow fixed widths, no-wrap, ellipsis-
+        truncated where they could overflow. The <colgroup> drives the fixed/auto split.
+      -->
       <div class="dock-feed col">
-        <q-markup-table dense flat dark wrap-cells class="dock-table">
+        <q-markup-table dense flat dark class="dock-table dock-table--message-first">
+          <colgroup>
+            <col class="col-time" />
+            <col class="col-queue" />
+            <col class="col-state" />
+            <col class="col-instance" />
+            <col class="col-mapping" />
+            <col class="col-job" />
+            <col class="col-message" />
+          </colgroup>
           <thead>
             <tr>
               <th class="text-left">Time</th>
@@ -147,8 +161,8 @@
               :class="e.type === 'error' ? 'row-error' : ''"
             >
               <td class="text-no-wrap text-grey-5">{{ fmtTime(e.time) }}</td>
-              <td class="text-no-wrap">
-                <span v-if="e.queue">{{ e.queue }}</span>
+              <td class="cell-truncate">
+                <span v-if="e.queue">{{ e.queue }}<q-tooltip v-if="e.queue">{{ e.queue }}</q-tooltip></span>
                 <span v-else class="text-grey-7">—</span>
               </td>
               <td class="text-no-wrap">{{ e.state || '—' }}</td>
@@ -165,9 +179,12 @@
                 </q-badge>
                 <span v-else class="text-grey-7">—</span>
               </td>
-              <td class="text-no-wrap">{{ e.mapping || '—' }}</td>
+              <td class="cell-truncate">
+                <span v-if="e.mapping">{{ e.mapping }}<q-tooltip>{{ e.mapping }}</q-tooltip></span>
+                <span v-else class="text-grey-7">—</span>
+              </td>
               <td class="text-no-wrap text-grey-5">{{ e.jobId || '—' }}</td>
-              <td :class="e.type === 'error' ? 'text-negative' : ''">
+              <td class="cell-message" :class="e.type === 'error' ? 'text-negative' : ''">
                 <div>{{ e.text }}</div>
                 <div v-if="e.error" class="text-caption text-negative">{{ e.error }}<span v-if="e.line"> @ {{ e.line }}</span></div>
               </td>
@@ -336,6 +353,31 @@ onBeforeUnmount(stopResize)
   top: 0;
   background: #262626;
   z-index: 1;
+}
+
+/* Message-first layout (issue #23 A): fixed table so the <colgroup> widths hold; Message (the only
+   auto-width column) flexes to fill the remaining width, so it is always the widest column. The
+   tightened columns get narrow fixed widths and ellipsis-truncate where content can overflow. */
+.dock-table--message-first {
+  table-layout: fixed;
+  width: 100%;
+}
+.dock-table--message-first .col-time { width: 92px; }
+.dock-table--message-first .col-queue { width: 110px; }
+.dock-table--message-first .col-state { width: 84px; }
+.dock-table--message-first .col-instance { width: 120px; }
+.dock-table--message-first .col-mapping { width: 150px; }
+.dock-table--message-first .col-job { width: 84px; }
+.dock-table--message-first .col-message { width: auto; }
+.dock-table--message-first td.cell-truncate {
+  max-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dock-table--message-first td.cell-message {
+  white-space: normal;
+  word-break: break-word;
 }
 .row-error {
   background: rgba(244, 67, 54, 0.08);
