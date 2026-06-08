@@ -111,6 +111,13 @@ Delivery is driven by an **iterative loop**: build a vertical slice → write ba
 
 - App defaults to **dark mode**; all input controls use the **outlined** variant so field edges are visible — consistent with the reference Monitor's existing style.
 
+### Tables, sorting & pagination (house style)
+
+- **Most-recent-first by default.** Whatever the sort, the default view should land the operator on the newest, most relevant data without scrolling — they should not have to page or re-sort to see what just happened.
+- **Live Monitor feed**: data **fills down and scrolls up** — new events append and the viewport keeps the latest in view (capped history per context), like the reference Worker Monitor.
+- **Static data tables** (Jobs, Failed Jobs, Batches, Archive): default sort is **date descending** (newest first), unless a **name** column is the more natural primary key for that table (e.g. the Connections registry sorts by name). Date-bearing tables lead with the most recent row.
+- **Quasar virtual-scroll tables are acceptable** (and preferred over hidden pagination for long lists) — show the data in one scrollable surface rather than burying recent rows behind page 2. Small admin lists (e.g. Connections) may simply show all rows.
+
 ### Extended live-event contract
 
 - The broadcast **message format is extended** so live events carry the fields the Monitor needs to display and filter — rather than cbqManager trying to reconstruct them. cbqManager **defines the canonical contract** it consumes; the publisher (the cbq broadcast emitter in the Managed App's Workers) is expected to conform.
