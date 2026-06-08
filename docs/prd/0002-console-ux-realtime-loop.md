@@ -110,6 +110,7 @@ Delivery is driven by an **iterative loop**: build a vertical slice → write ba
 ### Styling
 
 - App defaults to **dark mode**; all input controls use the **outlined** variant so field edges are visible — consistent with the reference Monitor's existing style.
+- **Dialogs auto-focus their first field.** Any input dialog (e.g. the Connection editor) focuses its first field on open so the operator can type immediately without reaching for the mouse — a general design rule for the console.
 
 ### Tables, sorting & pagination (house style)
 
@@ -117,6 +118,29 @@ Delivery is driven by an **iterative loop**: build a vertical slice → write ba
 - **Live Monitor feed**: data **fills down and scrolls up** — new events append and the viewport keeps the latest in view (capped history per context), like the reference Worker Monitor.
 - **Static data tables** (Jobs, Failed Jobs, Batches, Archive): default sort is **date descending** (newest first), unless a **name** column is the more natural primary key for that table (e.g. the Connections registry sorts by name). Date-bearing tables lead with the most recent row.
 - **Quasar virtual-scroll tables are acceptable** (and preferred over hidden pagination for long lists) — show the data in one scrollable surface rather than burying recent rows behind page 2. Small admin lists (e.g. Connections) may simply show all rows.
+
+### Console layout v2 — ops-focused shell (supersedes the separate Connections page)
+
+Reframed around the operator north star (see `CONTEXT.md` → Primary operator workflow). The console
+opens straight onto a working context and keeps the live feed central; managing Connections is inline,
+not a destination screen.
+
+- **Connections are managed from a rich picker**, not a separate table/route. The toolbar "Open a
+  Connection" control lists Connections (with environment + live badge) and offers per-row **open /
+  edit / delete** plus an **Add Connection** entry. The standalone Connections nav node and the
+  full-page Connections table are removed (the Connection editor dialog is reused by the picker).
+- **Open straight into work**: on load, **restore the previously open tabs from a cookie** (and the
+  active tab + each tab's last tool); if there were none, **auto-open the first Connection**. The
+  morning check becomes one manual refresh, not a setup ritual.
+- **Default to Queue Health** in the top pane for the active tab; the operator's manual refresh drives
+  the data (no surprise auto-polling).
+- **Lazy per-tab subscribe**: a tab subscribes to its Broadcast Connection when opened, and stays
+  subscribed in the background so its badge keeps moving; tabs that are never opened never subscribe.
+- Consider surfacing the tab's **live Broadcast Channel** in the tab footer, and reclaiming the empty
+  space under the tool list in the drawer (open question — may fold tools into the tab/top pane).
+- **Live filtering is the centerpiece** (separate slice): the Live Monitor needs fast, combinable
+  filters — free **text**, **Queue**, **server/instance** — plus a "current feed **+ search the last
+  N minutes**" lookback to find a just-happened error, and eventually **capture-everything + replay**.
 
 ### Extended live-event contract
 

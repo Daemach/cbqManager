@@ -2,6 +2,18 @@
 
 A standalone operations console for monitoring and controlling **cbq** background-job queues that belong to **other** applications. It is an admin/ops plane, not a worker app — it defines few or no Job classes of its own; instead it attaches to external cbq storage to observe and act on jobs.
 
+## Primary operator workflow (north star)
+
+The console is built around one daily operator loop, and design decisions serve it:
+
+1. **Morning check** — connect VPNs, open the console, **manually refresh**, and scan the production Connection's **Queue Health** plus the **live traffic** feed.
+2. **Watch all day** — the live traffic (Live Monitor) view stays open continuously; the operator leaves it running and glances at it.
+3. **Solve problems fast** — when something looks wrong, the operator must quickly **filter the live feed to isolate the problem**: by free **text**, by **Queue**, by **server/instance name**, etc. **Live filtering is the single most important capability.**
+4. **Find the recent error** — beyond the live feed, the operator needs to **search the recent past** (e.g. "current feed + the last ~10 minutes") to locate an error or pattern that just occurred.
+5. **Capture & replay (future)** — capture *everything* that streams through and make it easy to **replay** a window later for diagnosis.
+
+Implications the layout follows: the Live Monitor is the persistent centerpiece (not a sub-screen); Connections are managed inline (a rich picker), not via a separate table that eats space; the console opens straight onto a working context (auto-open + restore tabs) so the morning check is one refresh, not a setup ritual.
+
 ## Language
 
 **Managed App**:
