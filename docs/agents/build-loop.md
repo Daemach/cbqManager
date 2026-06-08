@@ -36,7 +36,13 @@ tests MUST be green before any push.
 
 - **Backend** (BoxLang/ColdBox) runs from this copy on **port 60472** (`box server start`; webroot
   `public`). After editing backend `.bx` (handlers, config, models), reload with a fwreinit
-  (`curl "http://localhost:60472/?fwreinit=1"`) or `box server restart` — never leave it down.
+  (`curl "http://localhost:60472/?fwreinit=1"`) — never leave it down. **Avoid `box server restart`**:
+  it can leave the JWT/CacheBox token storage in a broken state where every fresh login is rejected
+  ("Invalid or Missing Authentication Credentials" → handlers fall back to the `viewer` role → 403 on
+  admin actions like `connection.list`, which looks like "can't log in / blank app"). If you truly
+  need a full restart (e.g. JVM/heap change), do a CLEAN `box server stop` then `box server start`
+  (and wait for "Server is up"), then smoke-test `POST /api/login` → `GET /api/whoami` returns the
+  admin before trusting the server. A fwreinit does NOT hit this — prefer it.
 - **Frontend** (Vite dev) runs on **port 9000** and proxies `/api` → `127.0.0.1:60472`. Start it
   persistently (`nohup yarn --cwd frontend dev &`) so Playwright (`reuseExistingServer:true`) reuses
   it instead of cycling it; keep it up so the site is always live.
