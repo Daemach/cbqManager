@@ -5,7 +5,19 @@
       TODO: progress bars (pending/failed/total), cancel / retry-failed / delete actions, and
       drill-down to live jobs via $.batchId (PRD batches).
     -->
-    <q-table :rows="rows" :columns="columns" row-key="id" :loading="loading" dense flat bordered>
+    <q-table
+      v-model:pagination="pagination"
+      :rows="rows"
+      :columns="columns"
+      row-key="id"
+      :loading="loading"
+      :rows-per-page-options="[0]"
+      virtual-scroll
+      :virtual-scroll-sticky-size-start="0"
+      class="data-table"
+      dense flat bordered
+      data-test="batches-table"
+    >
       <template #body-cell-actions="props">
         <q-td :props="props" class="q-gutter-xs">
           <q-btn dense size="sm" color="negative" label="Cancel" @click="cancel(props.row.id)" />
@@ -25,11 +37,16 @@ const props = defineProps({ connectionId: { type: [String, Number], required: tr
 const $q = useQuasar()
 const rows = ref([])
 const loading = ref(false)
+// Recent-first house style (PRD-0002): default sort createdDate DESC so the newest Batch is the first
+// visible row — agreeing with BatchRepository.list's ORDER BY createdDate DESC. Batches load as one
+// client-side set (small admin list), so q-table's sort controls re-order all rows here.
+const pagination = ref({ page: 1, rowsPerPage: 0, sortBy: 'createdDate', descending: true })
 const columns = [
-  { name: 'name', label: 'Name', field: 'name', align: 'left' },
-  { name: 'totalJobs', label: 'Total', field: 'totalJobs', align: 'right' },
-  { name: 'pendingJobs', label: 'Pending', field: 'pendingJobs', align: 'right' },
-  { name: 'failedJobs', label: 'Failed', field: 'failedJobs', align: 'right' },
+  { name: 'name', label: 'Name', field: 'name', align: 'left', sortable: true },
+  { name: 'createdDate', label: 'Created', field: 'createdDate', align: 'left', sortable: true },
+  { name: 'totalJobs', label: 'Total', field: 'totalJobs', align: 'right', sortable: true },
+  { name: 'pendingJobs', label: 'Pending', field: 'pendingJobs', align: 'right', sortable: true },
+  { name: 'failedJobs', label: 'Failed', field: 'failedJobs', align: 'right', sortable: true },
   { name: 'actions', label: 'Actions', field: 'id', align: 'right' }
 ]
 
@@ -52,3 +69,9 @@ function retryFailed(id) {
 }
 onMounted(load)
 </script>
+
+<style scoped>
+.data-table {
+  max-height: calc(100vh - 220px);
+}
+</style>

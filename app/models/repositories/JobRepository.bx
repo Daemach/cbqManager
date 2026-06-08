@@ -41,7 +41,10 @@ class {
 			q.whereLike( "payload", "%#arguments.filters.mapping#%" );
 		}
 
-		var data = q.orderBy( "id" ).paginate( arguments.page, arguments.maxRows );
+		// Recent-first house style (PRD-0002): cbq_jobs.id is auto-increment, so id DESC lands the
+		// operator on the newest Jobs without paging/re-sorting. Matches the q-table's default
+		// pagination ( sortBy: id, descending: true ) so the first page is genuinely the newest rows.
+		var data = q.orderBy( "id", "desc" ).paginate( arguments.page, arguments.maxRows );
 		data.results = data.results.map( ( row ) => {
 			row[ "state" ] = classifier.classify( row, now );
 			return row;

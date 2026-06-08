@@ -13,7 +13,11 @@
       row-key="id"
       :loading="loading"
       :filter="filter"
+      virtual-scroll
+      :virtual-scroll-sticky-size-start="0"
+      class="data-table"
       dense flat bordered
+      data-test="failed-table"
       @request="onRequest"
     >
       <template #top-right>
@@ -53,7 +57,10 @@ function watchQueue(q) {
 const rows = ref([])
 const loading = ref(false)
 const filter = ref('')
-const pagination = ref({ page: 1, rowsPerPage: 25, rowsNumber: 0, sortBy: 'failedDate', descending: true })
+// Recent-first house style (PRD-0002): default sort failedDate DESC so the newest Failed Job is the
+// first visible row on load — agreeing with FailedJobRepository.list's ORDER BY failedDate DESC. A
+// larger window (100) feeds the virtual-scroll surface rather than hiding recent failures on page 2.
+const pagination = ref({ page: 1, rowsPerPage: 100, rowsNumber: 0, sortBy: 'failedDate', descending: true })
 
 const columns = [
   { name: 'failedDate', label: 'Failed', field: 'failedDate', align: 'left' },
@@ -90,6 +97,9 @@ onMounted(onRequest)
 </script>
 
 <style scoped>
+.data-table {
+  max-height: calc(100vh - 220px);
+}
 .queue-drill {
   color: var(--q-primary);
   cursor: pointer;

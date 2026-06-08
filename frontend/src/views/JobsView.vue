@@ -16,7 +16,11 @@
       :columns="columns"
       row-key="id"
       :loading="loading"
+      virtual-scroll
+      :virtual-scroll-sticky-size-start="0"
+      class="data-table"
       dense flat bordered
+      data-test="jobs-table"
       @request="onRequest"
     >
       <template #body-cell-queue="props">
@@ -55,7 +59,11 @@ function watchQueue(q) {
 const rows = ref([])
 const loading = ref(false)
 const queue = ref('')
-const pagination = ref({ page: 1, rowsPerPage: 25, rowsNumber: 0 })
+// Recent-first house style (PRD-0002 'Tables, sorting & pagination'): cbq_jobs.id is auto-increment,
+// so descending id == newest Jobs first. This MUST agree with JobRepository.list's ORDER BY id DESC
+// so the first server page is genuinely the most recent rows the operator lands on. A larger window
+// (100) feeds the virtual-scroll surface so recent rows aren't buried behind page 2.
+const pagination = ref({ page: 1, rowsPerPage: 100, rowsNumber: 0, sortBy: 'id', descending: true })
 
 const columns = [
   { name: 'id', label: 'ID', field: 'id', align: 'left', sortable: true },
@@ -91,6 +99,11 @@ onMounted(reload)
 </script>
 
 <style scoped>
+/* Bound the height so virtual-scroll renders a real scroll surface (recent rows up top, scroll for
+   the rest) instead of an ever-growing page that re-hides the newest rows. */
+.data-table {
+  max-height: calc(100vh - 220px);
+}
 .queue-drill {
   color: var(--q-primary);
   cursor: pointer;
