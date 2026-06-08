@@ -94,6 +94,11 @@ async function load() {
   loading.value = true
   try {
     rows.value = (await api.listConnections()).data || []
+  } catch (e) {
+    // 401/403 are surfaced + redirected by the global handler (App.vue); just clear the table so we
+    // don't sit on a stale list or leak an uncaught rejection.
+    rows.value = []
+    if (e.status !== 401 && e.status !== 403) $q.notify({ type: 'negative', message: e.message || 'Failed to load connections' })
   } finally {
     loading.value = false
   }

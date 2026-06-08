@@ -23,7 +23,15 @@ async function request(method, path, { body, params } = {}) {
   })
   const json = await res.json().catch(() => ({}))
   if (!res.ok) {
-    throw Object.assign(new Error(json?.messages?.join(', ') || res.statusText), { status: res.status, json })
+    const err = Object.assign(new Error(json?.messages?.join(', ') || res.statusText), { status: res.status, json })
+    // Auth/permission failures must never fail silently: signal a global handler (App.vue) so the
+    // user gets a notification and is sent back to login, instead of a blank screen + an uncaught
+    // promise rejection. 401 = unauthenticated/expired, 403 = token lacks the required permission;
+    // both mean "re-authenticate" for this single-admin console.
+    if ((res.status === 401 || res.status === 403) && typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('cbqm:auth-error', { detail: { status: res.status, message: err.message } }))
+    }
+    throw err
   }
   return json
 }

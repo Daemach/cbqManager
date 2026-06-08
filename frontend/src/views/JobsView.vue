@@ -72,6 +72,9 @@ async function onRequest(p) {
     const res = await api.listJobs(props.connectionId, { page: pg.page, maxRows: pg.rowsPerPage, queue: queue.value || '' })
     rows.value = res.data || []
     pagination.value = { ...pg, rowsNumber: res.pagination?.totalRecords || 0 }
+  } catch (e) {
+    rows.value = [] // 401/403 handled globally (App.vue); avoid an uncaught rejection
+    if (e.status !== 401 && e.status !== 403) $q.notify({ type: 'negative', message: e.message || 'Failed to load jobs' })
   } finally {
     loading.value = false
   }
