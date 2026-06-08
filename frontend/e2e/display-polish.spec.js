@@ -80,6 +80,31 @@ test.describe('Display polish — payload, timestamps, monitor columns (#23)', (
     }
   })
 
+  test('Jobs: Mapping + Batch are extracted from the payload; a short payload previews on hover', async ({ page }) => {
+    await loginAndOpenApp(page)
+    await stub(page, '**/api/connections/**/jobs**', [
+      { id: 901, queue: 'emails', state: 'available', attempts: 0, payload: '{"mapping":"UpdateDatamapsJob","batchId":"BATCH-XYZ"}', hrCreatedDate: isoMinutesAgo(2) },
+      { id: 902, queue: 'emails', state: 'available', attempts: 0, payload: '{"mapping":"OrphanJob","batchId":null}', hrCreatedDate: isoMinutesAgo(2) }
+    ])
+    const id = await createConn(page, `e2e-mapping-${Date.now()}`)
+    try {
+      await page.goto(`/#/c/${id}/jobs`)
+      await expect(page.locator('[data-test=jobs-table]')).toBeVisible()
+      const first = dataRows(page, 'jobs-table').first()
+      // Mapping + Batch surfaced from the payload JSON.
+      await expect(first).toContainText('UpdateDatamapsJob')
+      await expect(first).toContainText('BATCH-XYZ')
+      // A null batchId renders the em-dash placeholder, not "null".
+      await expect(dataRows(page, 'jobs-table').nth(1)).not.toContainText('null')
+
+      // Short payload previews inline on hover (no dialog needed).
+      await page.locator('[data-test=payload-901]').hover()
+      await expect(page.locator('[data-test=payload-tip-901]')).toContainText('"mapping": "UpdateDatamapsJob"')
+    } finally {
+      await deleteConn(page, id)
+    }
+  })
+
   test('Jobs: non-JSON payload falls back to raw text; blank payload shows empty state', async ({ page }) => {
     await loginAndOpenApp(page)
     await stub(page, '**/api/connections/**/jobs**', [

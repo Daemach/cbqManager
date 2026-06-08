@@ -53,7 +53,10 @@
       <template #body-cell-payload="props">
         <q-td :props="props">
           <q-btn dense flat round size="sm" icon="data_object" :data-test="`payload-${props.row.id}`" @click="showPayload(props.row)">
-            <q-tooltip>View payload</q-tooltip>
+            <q-tooltip v-if="tooltipPayload(props.row.payload)" :data-test="`payload-tip-${props.row.id}`">
+              <pre class="payload-tip">{{ tooltipPayload(props.row.payload) }}</pre>
+            </q-tooltip>
+            <q-tooltip v-else>View payload</q-tooltip>
           </q-btn>
         </q-td>
       </template>
@@ -77,6 +80,7 @@ import { useQuasar } from 'quasar'
 import { api } from '@/services/api'
 import { useRealtimeStore } from '@/stores/realtime'
 import { elapsed as fmtElapsedValue } from '@/services/timeFormat.js'
+import { payloadField, tooltipPayload } from '@/services/payloadView.js'
 import PayloadDialog from '@/components/PayloadDialog.vue'
 import TimeCell from '@/components/TimeCell.vue'
 
@@ -116,6 +120,9 @@ const pagination = ref({ page: 1, rowsPerPage: 100, rowsNumber: 0, sortBy: 'id',
 const columns = [
   { name: 'id', label: 'ID', field: 'id', align: 'left', sortable: true },
   { name: 'queue', label: 'Queue', field: 'queue', align: 'left' },
+  // Mapping (the Job type) + Batch live INSIDE the payload JSON, not as top-level columns — surface them.
+  { name: 'mapping', label: 'Mapping', field: (r) => payloadField(r.payload, 'mapping'), align: 'left', format: (v) => v || '—' },
+  { name: 'batch', label: 'Batch', field: (r) => payloadField(r.payload, 'batchId'), align: 'left', format: (v) => v || '—' },
   { name: 'state', label: 'State', field: 'state', align: 'left' },
   { name: 'attempts', label: 'Attempts', field: 'attempts', align: 'right' },
   { name: 'created', label: 'Created', field: 'hrCreatedDate', align: 'left' },
@@ -164,5 +171,13 @@ onMounted(reload)
 }
 .queue-drill:hover {
   text-decoration: underline;
+}
+/* Short payloads preview inline on hover (monospace, wrapped); longer ones use the dialog. */
+.payload-tip {
+  margin: 0;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  white-space: pre-wrap;
+  max-width: 360px;
 }
 </style>
