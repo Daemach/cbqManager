@@ -59,6 +59,29 @@ Your application will be available at `http://localhost:8080` 🌐
 
 Code to your liking and enjoy! 🎊
 
+## 🗄️ Own Store (database) — keep SQLite on a LOCAL disk
+
+cbqManager keeps its own state (users, the Connection Registry, Broadcast Connections, the Archive,
+and the audit log) in an **own store**. By default that store is **SQLite**, at
+`resources/db/cbqmanager.db`, for zero local dependency (ADR-0005). It can move to MSSQL by setting
+the `CBQM_DB_*` env vars only.
+
+> ⚠️ **Host the SQLite own store on a LOCAL disk — never on a network/SMB share.** SQLite relies on
+> WAL journaling and OS file locking for safe concurrency. On an SMB share `PRAGMA journal_mode=WAL`
+> silently falls back to `delete` and locks are unreliable, so the background **Harvester** and
+> concurrent admin writes hit spurious `SQLITE_BUSY: database is locked` errors. On local disk WAL
+> works, and the app sets it explicitly:
+>
+> - `Application.bx` configures the own-store datasource with `journal_mode=WAL`, `busy_timeout=5000`,
+>   and `synchronous=NORMAL` (via the bx-sqlite `custom` struct), so brief write contention **waits**
+>   instead of erroring.
+> - The Harvester therefore defaults **ON** for a local-disk SQLite store (override with
+>   `CBQM_HARVEST_ENABLED=false`). Set it false only if you must run the store on an SMB share.
+> - This is why the Playwright e2e suite runs fully parallel again (issue #12).
+>
+> For production, use a **local-disk** SQLite db or an **MSSQL** own store — both give reliable
+> concurrency.
+
 ## 📁Application Structure
 
 This ColdBox 8 application follows a clean, modern architecture with the following structure:

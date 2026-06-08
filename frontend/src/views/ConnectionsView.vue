@@ -6,7 +6,11 @@
       <q-btn color="primary" icon="add" label="Add Connection" data-test="add-connection" @click="openCreate" />
     </div>
 
-    <q-table :rows="rows" :columns="columns" row-key="id" :loading="loading" dense flat bordered>
+    <!-- Admin registry: show every Connection on one page (the list is small) rather than hiding
+         rows behind 5-row pagination — keeps the screen scannable and makes UI assertions
+         deterministic regardless of how many Connections exist (issue #12). -->
+    <q-table :rows="rows" :columns="columns" row-key="id" :loading="loading" dense flat bordered
+             :pagination="{ rowsPerPage: 0 }" hide-pagination>
       <template #body-cell-actions="props">
         <q-td :props="props" class="q-gutter-xs">
           <q-btn dense size="sm" icon="monitor_heart" :to="{ name: 'health', params: { connectionId: props.row.id } }">

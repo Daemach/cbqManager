@@ -67,11 +67,13 @@ class {
 			// Credential vault (ADR-0003) — key lives ONLY in the environment
 			"encryptionKey"   : getSystemSetting( "CBQM_ENCRYPTION_KEY", "" ),
 			// Harvester / Archive (ADR-0004). The Harvester writes Archive snapshots to the own store
-			// on an interval. SQLite is single-writer and (on some volumes) WAL-incapable, so a
-			// background Harvester contends with request writes. Default it OFF when the own store is
-			// SQLite and ON for a concurrency-capable store (e.g. MSSQL); CBQM_HARVEST_ENABLED overrides.
+			// on an interval. SQLite is single-writer, but with WAL + busy_timeout (configured on the
+			// own-store datasource in Application.bx) a LOCAL-disk SQLite store tolerates the background
+			// writer concurrently with request writes — so default the Harvester ON (issue #12). WAL is
+			// unavailable on SMB network shares; if you must host the own store there, set
+			// CBQM_HARVEST_ENABLED=false. The env var overrides the default either way.
 			"harvest" : {
-				"enabled"          : getSystemSetting( "CBQM_HARVEST_ENABLED", getSystemSetting( "CBQM_DB_DRIVER", "sqlite" ) != "sqlite" ),
+				"enabled"          : getSystemSetting( "CBQM_HARVEST_ENABLED", true ),
 				"intervalSeconds"  : getSystemSetting( "CBQM_HARVEST_INTERVAL", 60 ),
 				"retentionDays"    : getSystemSetting( "CBQM_ARCHIVE_RETENTION_DAYS", 180 )
 			},

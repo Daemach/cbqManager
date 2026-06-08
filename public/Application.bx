@@ -71,12 +71,25 @@ class{
 		"/",
 		"all"
 	)
+	variables._cbqmDriver = getSystemSetting( "CBQM_DB_DRIVER", "sqlite" )
 	this.datasources[ "cbqManager" ] = {
 		// BoxLang uses a registered driver NAME (bx-sqlite registers "sqlite"). The SQLite driver
 		// wants a `database` file path and builds the jdbc:sqlite URL itself.
 		// (For MSSQL later, switch to driver "mssql" with host/port/database/username/password.)
-		"driver"   : getSystemSetting( "CBQM_DB_DRIVER", "sqlite" ),
+		"driver"   : variables._cbqmDriver,
 		"database" : getSystemSetting( "CBQM_DB_DATABASE", variables._cbqmDbFile )
+	}
+	// SQLite own store on LOCAL disk: enable WAL + a busy_timeout so brief write contention (the
+	// Harvester or two operators editing the registry at once) waits instead of throwing
+	// SQLITE_BUSY (issue #12). bx-sqlite takes PRAGMAs via the `custom` struct. WAL is a persistent
+	// db-header setting; busy_timeout is per-connection. NOTE: WAL is unavailable on SMB network
+	// shares — keep the own-store db on local disk (ADR-0005) or move to MSSQL.
+	if ( variables._cbqmDriver == "sqlite" ) {
+		this.datasources[ "cbqManager" ][ "custom" ] = {
+			"journal_mode" : "WAL",
+			"busy_timeout" : "5000",
+			"synchronous"  : "NORMAL"
+		}
 	}
 	this.datasource = "cbqManager"
 

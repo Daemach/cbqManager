@@ -14,18 +14,20 @@ const CAPTURE = process.env.PW_CAPTURE === '1' || process.env.PW_CAPTURE === 'tr
 // /api to the ColdBox server. NOTE: the ColdBox server (box server start) must be running too.
 export default defineConfig({
   testDir: './e2e',
-  outputDir: './test-results',
+  // All transient test output goes under the repo-root .loop-artifacts/ folder (gitignored) so an
+  // unattended build loop never needs to `rm` (which requires approval). The human cleans up
+  // .loop-artifacts/ later. See docs/agents/build-loop.md.
+  outputDir: '../.loop-artifacts/playwright/test-results',
   timeout: 30_000,
   expect: { timeout: 10_000 },
-  // cbqManager's own store is SQLite (single writer). Specs that create/delete Connections in
-  // parallel hit SQLITE_BUSY, so run one worker — the suite is small and stays deterministic.
-  // (Follow-up: a busy_timeout/WAL on the own-store datasource would let this go parallel again.)
-  fullyParallel: false,
-  workers: 1,
+  // cbqManager's own store is SQLite (single writer). With WAL + busy_timeout now set on the
+  // own-store datasource (Application.bx, issue #12), concurrent Connection writes wait instead of
+  // throwing SQLITE_BUSY on a local-disk store, so the suite runs parallel again.
+  fullyParallel: true,
   reporter: [
     [ 'list' ],
-    [ 'junit', { outputFile: '../tests/results/playwright-junit.xml' } ],
-    [ 'html', { open: 'never', outputFolder: 'playwright-report' } ]
+    [ 'junit', { outputFile: '../.loop-artifacts/playwright/junit.xml' } ],
+    [ 'html', { open: 'never', outputFolder: '../.loop-artifacts/playwright/report' } ]
   ],
   use: {
     baseURL: 'http://localhost:9000',
