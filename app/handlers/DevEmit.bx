@@ -1,0 +1,80 @@
+/**
+ * DevEmit — a DEVELOPMENT-ONLY path that publishes a synthetic Worker event to a Connection's
+ * Broadcast Connection so an operator (or an e2e) can fire a test event and watch the Live Monitor
+ * light up over the REAL transport, without waiting on the external Managed App's Workers (#22).
+ *
+ * SECURITY:
+ *  - HARD-GATED to the `development` environment — returns 404 in any other environment, so this can
+ *    never be exercised in production even if the route is reachable.
+ *  - Still behind the JWT/RBAC gate (`monitor.view`, Connection-scoped) like the rest of the API.
+ *  - Resolves the Pusher appId/secret via ConnectionRegistry.resolveBroadcast and publishes
+ *    server-side (PusherPublisher); the secret NEVER reaches the client.
+ */
+class extends="BaseApiHandler" {
+
+	property name="registry"  inject="ConnectionRegistry";
+	property name="publisher" inject="PusherPublisher";
+
+	/**
+	 * POST /api/dev/connections/:connectionId/emit
+	 *
+	 * Body (all optional): { eventType:"cbqWorker"|"cbqWorkerError", queue, instance, mapping, jobId,
+	 * state, text }. (`eventType`, not `event` — ColdBox reserves rc.event for the routed event name.)
+	 * Defaults synthesize a plausible cbqWorker (or cbqWorkerError) event matching the
+	 * EventNormalizer contract.
+	 *
+	 * @return { published:boolean, status:numeric, channel, event } — never any secret.
+	 */
+	function emit( event, rc, prc ){
+		// Hard dev gate first: in any non-development environment this endpoint does not exist.
+		if ( getSetting( "environment" ) != "development" ){
+			event.getResponse().setError( true ).setStatusCode( 404 ).addMessage( "Not found" );
+			return;
+		}
+		if ( !secure( event, "monitor.view", rc.connectionId ) ) return;
+
+		var pub = registry.publicBroadcastFor( rc.connectionId );
+		if ( !pub.realtime || lcase( pub.transport ) != "pusher" ){
+			event.getResponse().setError( true ).setStatusCode( 422 )
+				.addMessage( "Connection has no Pusher Broadcast Connection configured" );
+			return;
+		}
+
+		var conn = registry.get( rc.connectionId );
+		var broadcast = registry.resolveBroadcast( conn.broadcastConnectionId );
+
+		var eventName = ( rc.eventType ?: "" ) == "cbqWorkerError" ? "cbqWorkerError" : "cbqWorker";
+		var isError   = eventName == "cbqWorkerError";
+
+		// Synthesize a payload matching the EventNormalizer extended contract (PRD-0002).
+		var payload = {
+			"queue"    : rc.queue    ?: "default",
+			"instance" : rc.instance ?: "dev-emit",
+			"mapping"  : rc.mapping  ?: ( isError ? "FailingDemoJob" : "DemoJob" ),
+			"jobId"    : rc.jobId    ?: "#getTickCount()#",
+			"state"    : rc.state    ?: ( isError ? "failed" : "completed" ),
+			"type"     : isError ? "error" : "info",
+			"text"     : rc.text     ?: ( isError ? "Synthetic Worker error (dev emit)" : "Synthetic Worker event (dev emit)" )
+		};
+		if ( isError ){
+			payload[ "error" ] = rc.error ?: "DemoException: synthetic failure";
+		}
+
+		var result = publisher.publish(
+			broadcast = broadcast,
+			channel   = pub.channel,
+			event     = eventName,
+			payload   = payload
+		);
+
+		audit( "dev.emit", { targetType : "connection", targetId : rc.connectionId, connectionId : rc.connectionId, detail : eventName, result : "#result.status#" } );
+
+		event.getResponse().setData( {
+			"published" : result.success,
+			"status"    : result.status,
+			"channel"   : pub.channel,
+			"event"     : eventName
+		} );
+	}
+
+}

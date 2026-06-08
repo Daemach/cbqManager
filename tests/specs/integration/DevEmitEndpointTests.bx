@@ -1,0 +1,110 @@
+/**
+ * DevEmit endpoint (#22) — the dev-only "emit test event" path that publishes a synthetic Worker
+ * event over the REAL transport so the operator can prove the Live Monitor receives.
+ *
+ * Asserts EXTERNAL behavior of POST /api/dev/connections/:connectionId/emit:
+ *   - in development, an admin can publish a cbqWorker / cbqWorkerError event to a Pusher-backed
+ *     Connection and Pusher returns HTTP 200 (round-trip);
+ *   - a Connection with no Pusher Broadcast Connection is rejected (422), not a 500;
+ *   - the response carries NO secret.
+ *
+ * Uses the seeded "Development Pusher" broadcast (real cloud, no VPN). If the dev fixture is absent
+ * the live assertion self-skips so the suite stays green offline.
+ */
+@autowire
+class extends="coldbox.system.testing.BaseTestCase" {
+
+	@inject( "ConnectionRegistry" )
+	property name="registry";
+
+	@inject( "provider:JwtService@cbsecurity" )
+	property name="jwtService";
+
+	@inject( "provider:authenticationService@cbauth" )
+	property name="cbauth";
+
+	@inject( "QueryBuilderFactory" )
+	property name="qbFactory";
+
+	function beforeAll(){ super.beforeAll(); }
+
+	function afterAll(){
+		var own = variables.qbFactory.forOwnStore();
+		own.from( "cbqm_connections" ).where( "name", "like", "TEST_%" ).delete();
+		super.afterAll();
+	}
+
+	function run(){
+		describe( "POST /api/dev/connections/:id/emit", () => {
+
+			beforeEach( ( currentSpec ) => {
+				setup();
+				cbauth.logout();
+				jwtService.getTokenStorage().clearAll();
+			} );
+
+			it( "publishes a synthetic cbqWorker event to a Pusher Connection and returns published:true (HTTP 200)", () => {
+				var bc = registry.findBroadcastByName( "Development Pusher" );
+				if ( structIsEmpty( bc ) ){
+					expect( true ).toBeTrue(); // dev fixture not seeded — skip
+					return;
+				}
+				var connId = registry.create( {
+					"name"                  : "TEST_EMIT_OK_" & getTickCount(),
+					"environment"           : "development",
+					"grammar"               : "mssql",
+					"datasourceClass"       : "com.microsoft.sqlserver.jdbc.SQLServerDriver",
+					"connectionString"      : "jdbc:sqlserver://localhost:1433;databaseName=X",
+					"secrets"               : { "username" : "sa", "password" : "p" },
+					"broadcastConnectionId" : bc.id,
+					"channel"               : "development",
+					"events"                : "cbqWorker,cbqWorkerError"
+				} );
+				try {
+					var token = jwtService.attempt( "admin", "password" );
+					var event = this.post(
+						route  = "/api/dev/connections/#connId#/emit",
+						params = { "x-auth-token" : token, "eventType" : "cbqWorkerError", "queue" : "emails" }
+					);
+					var response = event.getPrivateValue( "Response" );
+					expect( response.getError() ).toBeFalse( response.getMessages().toString() );
+					var data = response.getData();
+					expect( data.published ).toBeTrue();
+					expect( data.status ).toBe( 200 );
+					expect( data.channel ).toBe( "development" );
+					expect( data.event ).toBe( "cbqWorkerError" );
+					// no secret anywhere in the response
+					expect( jsonSerialize( data ) ).notToInclude( "pusherSecret" );
+					expect( jsonSerialize( data ) ).notToInclude( "secrets_enc" );
+				} finally {
+					registry.remove( connId );
+				}
+			} );
+
+			it( "rejects (422) a Connection with no Pusher Broadcast Connection", () => {
+				var connId = registry.create( {
+					"name"             : "TEST_EMIT_NORT_" & getTickCount(),
+					"environment"      : "development",
+					"grammar"          : "mssql",
+					"datasourceClass"  : "com.microsoft.sqlserver.jdbc.SQLServerDriver",
+					"connectionString" : "jdbc:sqlserver://localhost:1433;databaseName=X",
+					"secrets"          : { "username" : "sa", "password" : "p" }
+				} );
+				try {
+					var token = jwtService.attempt( "admin", "password" );
+					var event = this.post(
+						route  = "/api/dev/connections/#connId#/emit",
+						params = { "x-auth-token" : token }
+					);
+					var response = event.getPrivateValue( "Response" );
+					expect( response.getError() ).toBeTrue();
+					expect( response.getStatusCode() ).toBe( 422 );
+				} finally {
+					registry.remove( connId );
+				}
+			} );
+
+		} );
+	}
+
+}

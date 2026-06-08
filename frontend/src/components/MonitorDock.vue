@@ -74,6 +74,32 @@
       <q-btn dense flat round icon="delete_sweep" data-test="dock-clear" @click="clearFeed">
         <q-tooltip>Clear feed</q-tooltip>
       </q-btn>
+
+      <!-- DEV-ONLY: fire a synthetic Worker event over the real transport so you can prove the Live
+           Monitor receives without waiting on a Managed App's Workers (#22). Hidden outside DEV; the
+           backend hard-gates to development and publishes server-side (the secret never reaches us). -->
+      <q-btn-dropdown
+        v-if="isDev && store.activeId != null"
+        dense flat no-caps
+        split
+        icon="bolt"
+        color="amber-6"
+        class="q-ml-xs"
+        :loading="emitting"
+        data-test="dock-emit"
+        @click="emit('cbqWorker')"
+      >
+        <template #label><span class="text-caption">emit</span></template>
+        <q-list dark dense>
+          <q-item v-close-popup clickable data-test="dock-emit-worker" @click="emit('cbqWorker')">
+            <q-item-section>cbqWorker (info)</q-item-section>
+          </q-item>
+          <q-item v-close-popup clickable data-test="dock-emit-error" @click="emit('cbqWorkerError')">
+            <q-item-section>cbqWorkerError (error)</q-item-section>
+          </q-item>
+        </q-list>
+        <q-tooltip>Dev: emit a synthetic Worker event over the real transport</q-tooltip>
+      </q-btn-dropdown>
       <q-btn
         dense flat round
         :icon="collapsed ? 'expand_less' : 'expand_more'"
@@ -155,9 +181,37 @@
 
 <script setup>
 import { ref, computed, onBeforeUnmount } from 'vue'
+import { useQuasar } from 'quasar'
 import { useRealtimeStore } from '@/stores/realtime'
+import { api } from '@/services/api'
 
+const $q = useQuasar()
 const store = useRealtimeStore()
+
+// The dev-only emit affordance is hidden outside development; the backend also hard-gates it.
+const isDev = import.meta.env.DEV
+const emitting = ref(false)
+
+// Fire a synthetic Worker event for the active Connection over the REAL transport (#22). The browser
+// only names the event type; the backend resolves the Pusher secret and publishes — Pusher then
+// delivers it back to this very dock via pusher-js, proving the subscriber plumbing end-to-end.
+async function emit(eventType) {
+  if (store.activeId == null || emitting.value) return
+  emitting.value = true
+  try {
+    const res = await api.devEmit(store.activeId, { eventType })
+    const data = res?.data ?? res
+    if (data?.published) {
+      $q.notify({ type: 'positive', message: `Emitted ${data.event} on ${data.channel}`, timeout: 1500 })
+    } else {
+      $q.notify({ type: 'warning', message: `Emit not published (status ${data?.status ?? '?'})` })
+    }
+  } catch (e) {
+    $q.notify({ type: 'negative', message: `Emit failed: ${e.message}` })
+  } finally {
+    emitting.value = false
+  }
+}
 
 const collapsed = ref(false)
 const height = ref(260)

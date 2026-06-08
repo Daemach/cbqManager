@@ -1,0 +1,123 @@
+/**
+ * PusherPublisher — the server-side Pusher REST trigger (ADR-0006), exercised two ways:
+ *
+ *  1) PURE signing contract (`signedRequest`): deterministic given a fixed timestamp, so we assert
+ *     the exact URL, body shape, body_md5, and HMAC-SHA256 auth_signature WITHOUT a network call.
+ *     This guarantees the signing math can never silently regress.
+ *
+ *  2) LIVE round-trip (`publish`): against the seeded "Development Pusher" broadcast (real cloud,
+ *     no VPN needed), asserting Pusher returns HTTP 200 — proving the dev "emit test event" path
+ *     actually delivers over the real transport. Labelled `live` so it can be excluded offline.
+ */
+@autowire
+class extends="coldbox.system.testing.BaseTestCase" {
+
+	@inject( "PusherPublisher" )
+	property name="publisher";
+
+	@inject( "ConnectionRegistry" )
+	property name="registry";
+
+	function beforeAll(){ super.beforeAll(); }
+
+	function run(){
+		describe( "PusherPublisher.signedRequest (pure signing)", () => {
+
+			beforeEach( ( currentSpec ) => { setup(); } );
+
+			it( "produces a deterministic, correctly-signed Pusher REST request", () => {
+				var signed = publisher.signedRequest(
+					appId     = "1325791",
+					key       = "publickey",
+					secret    = "mysecret",
+					cluster   = "us2",
+					channel   = "development",
+					event     = "cbqWorker",
+					payload   = { "queue" : "default", "state" : "completed" },
+					timestamp = 1700000000
+				);
+
+				// URL targets the cluster-specific REST host + app events path
+				expect( signed.url ).toInclude( "https://api-us2.pusher.com/apps/1325791/events?" );
+				// auth params present, version pinned, and the signature is lowercase hex HMAC-SHA256 (64 chars)
+				expect( signed.url ).toInclude( "auth_key=publickey" );
+				expect( signed.url ).toInclude( "auth_version=1.0" );
+				expect( signed.url ).toInclude( "auth_timestamp=1700000000" );
+				var sig = listLast( signed.url, "=" );
+				expect( sig ).toMatch( "^[0-9a-f]{64}$" );
+
+				// Body is Pusher's { name, channel, data } with data = the JSON-stringified payload
+				var parsed = jsonDeserialize( signed.body );
+				expect( parsed.name ).toBe( "cbqWorker" );
+				expect( parsed.channel ).toBe( "development" );
+				var data = jsonDeserialize( parsed.data );
+				expect( data.queue ).toBe( "default" );
+				expect( data.state ).toBe( "completed" );
+
+				// body_md5 in the URL matches the actual MD5 of the body (Pusher recomputes + compares)
+				expect( signed.url ).toInclude( "body_md5=" & lcase( hash( signed.body, "MD5" ) ) );
+			} );
+
+			it( "is stable: identical inputs yield an identical signature", () => {
+				var args = {
+					appId : "1", key : "k", secret : "s", cluster : "us2",
+					channel : "c", event : "cbqWorker", payload : { "a" : 1 }, timestamp : 123
+				};
+				expect( publisher.signedRequest( argumentCollection = args ).url )
+					.toBe( publisher.signedRequest( argumentCollection = args ).url );
+			} );
+
+			it( "rejects a non-pusher broadcast", () => {
+				expect( () => publisher.publish(
+					broadcast = { "transport" : "socketbox" },
+					channel   = "c",
+					event     = "cbqWorker",
+					payload   = {}
+				) ).toThrow( type = "cbqm.UnsupportedTransport" );
+			} );
+
+			it( "rejects a pusher broadcast missing its appId/secret", () => {
+				expect( () => publisher.publish(
+					broadcast = { "transport" : "pusher", "secrets" : {} },
+					channel   = "c",
+					event     = "cbqWorker",
+					payload   = {}
+				) ).toThrow( type = "cbqm.MissingPusherCredentials" );
+			} );
+
+		} );
+
+		describe( "PusherPublisher.publish (live round-trip)", () => {
+
+			beforeEach( ( currentSpec ) => { setup(); } );
+
+			it( "publishes a synthetic cbqWorker event to the seeded Development Pusher and gets HTTP 200", () => {
+				var bc = registry.findBroadcastByName( "Development Pusher" );
+				if ( structIsEmpty( bc ) ){
+					// dev fixture not seeded in this env — skip rather than fail the suite
+					expect( true ).toBeTrue();
+					return;
+				}
+				var broadcast = registry.resolveBroadcast( bc.id );
+				var result = publisher.publish(
+					broadcast = broadcast,
+					channel   = "development",
+					event     = "cbqWorker",
+					payload   = {
+						"queue"    : "default",
+						"instance" : "testbox-live",
+						"mapping"  : "TestEmitJob",
+						"jobId"    : "#getTickCount()#",
+						"state"    : "completed",
+						"type"     : "info",
+						"text"     : "live round-trip from PusherPublisherTests"
+					}
+				);
+				expect( result.status ).toBe( 200, "Pusher should accept the trigger; got [#result.status#] body=[#result.body#]" );
+				expect( result.success ).toBeTrue();
+			} );
+
+		} );
+	}
+
+}

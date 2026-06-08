@@ -70,6 +70,11 @@ class {
 		// Realtime (Live Monitor) broadcast config — PUBLIC params only, never the secret
 		get(    "/api/connections/:connectionId/broadcast", "Connections.broadcast" )
 
+		// DEV-ONLY: emit a synthetic Worker event over the real transport so the operator can prove
+		// the Live Monitor receives without waiting on the Managed App's Workers (#22). The handler
+		// hard-gates to the development environment (404 otherwise) and never exposes the secret.
+		post(   "/api/dev/connections/:connectionId/emit", "DevEmit.emit" )
+
 		// Audit (admin)
 		get(    "/api/audit", "Audit.index" )
 

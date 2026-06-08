@@ -1,0 +1,163 @@
+/**
+ * PusherPublisher — server-side publish to the Pusher REST trigger API (ADR-0006). This is the
+ * SERVER counterpart to the browser pusherAdapter: where the adapter SUBSCRIBES with the public key,
+ * this publisher TRIGGERS an event using the encrypted appId + secret (resolved via
+ * ConnectionRegistry.resolveBroadcast — never sent to a client).
+ *
+ * Used by the dev-only "emit test event" path so an operator can prove the Live Monitor receives
+ * over the real transport without waiting on an external Managed App's Workers. Nothing here is
+ * dev-gated itself — the gate lives at the handler — but it touches secrets, so it is INTERNAL ONLY.
+ *
+ * The request signing is a pure function (`signedRequest`) so it can be asserted in a unit test
+ * without a live network call; `publish` performs the HTTP POST via an injectable `httpSender` seam.
+ */
+@singleton
+class {
+
+	/**
+	 * The Pusher REST auth version is fixed at "1.0" by the protocol.
+	 */
+	variables.AUTH_VERSION = "1.0";
+
+	/**
+	 * Build the fully-signed Pusher REST trigger request for one event — a PURE function of its
+	 * inputs (deterministic given a fixed timestamp), so a test can assert the URL, body, and
+	 * HMAC-SHA256 signature without a network call.
+	 *
+	 * Pusher's scheme: POST https://api-<cluster>.pusher.com/apps/<appId>/events with query params
+	 * auth_key, auth_timestamp, auth_version, body_md5 (md5 hex of the JSON body), and an
+	 * auth_signature = HMAC-SHA256( "POST\n/apps/<appId>/events\n<sorted-query>", secret ) in
+	 * lowercase hex.
+	 *
+	 * @appId     Pusher app id (from the decrypted broadcast secret).
+	 * @key       Pusher public key.
+	 * @secret    Pusher app secret (decrypted; never leaves the server).
+	 * @cluster   Pusher cluster (e.g. "us2").
+	 * @channel   The Channel to publish on.
+	 * @event     The event name (e.g. "cbqWorker").
+	 * @payload   The event payload struct (serialized to the Pusher `data` field as a JSON string).
+	 * @timestamp Unix epoch seconds for auth_timestamp (injectable for deterministic tests).
+	 *
+	 * @return struct { url, body, headers } ready to POST.
+	 */
+	struct function signedRequest(
+		required string appId,
+		required string key,
+		required string secret,
+		required string cluster,
+		required string channel,
+		required string event,
+		required struct payload,
+		required numeric timestamp
+	){
+		var path = "/apps/#arguments.appId#/events";
+
+		// Pusher's `data` field is itself a JSON STRING (the payload serialized), not a nested object.
+		var body = jsonSerialize( {
+			"name"     : arguments.event,
+			"channel"  : arguments.channel,
+			"data"     : jsonSerialize( arguments.payload )
+		} );
+
+		var bodyMd5 = lcase( hash( body, "MD5" ) );
+
+		// Query params MUST be sorted by key for the signature to match what Pusher recomputes.
+		var params = {
+			"auth_key"       : arguments.key,
+			"auth_timestamp" : "#arguments.timestamp#",
+			"auth_version"   : variables.AUTH_VERSION,
+			"body_md5"       : bodyMd5
+		};
+		var queryString = sortedQueryString( params );
+
+		var stringToSign = "POST" & char( 10 ) & path & char( 10 ) & queryString;
+		var signature    = lcase( hmac( stringToSign, arguments.secret, "HmacSHA256" ) );
+
+		var endpoint = "https://api-#lcase( arguments.cluster )#.pusher.com#path#?#queryString#&auth_signature=#signature#";
+
+		return {
+			"url"     : endpoint,
+			"body"    : body,
+			"headers" : { "Content-Type" : "application/json" }
+		};
+	}
+
+	/**
+	 * Sign and POST one event to Pusher. Returns the HTTP result struct
+	 * { status:numeric, success:boolean, body:string }. A 200 means Pusher accepted the trigger.
+	 *
+	 * @broadcast The resolved Broadcast Connection (resolveBroadcast result) — must be transport
+	 *            "pusher" and carry `secrets.pusherAppId` + `secrets.pusherSecret`.
+	 * @channel   The Channel to publish on.
+	 * @event     The event name.
+	 * @payload   The event payload struct.
+	 */
+	struct function publish(
+		required struct broadcast,
+		required string channel,
+		required string event,
+		required struct payload
+	){
+		if ( lcase( arguments.broadcast.transport ?: "" ) != "pusher" ){
+			throw( type = "cbqm.UnsupportedTransport", message = "PusherPublisher only supports the pusher transport, got [#arguments.broadcast.transport ?: ''#]" );
+		}
+		var secrets = arguments.broadcast.secrets ?: {};
+		var appId   = secrets.pusherAppId ?: "";
+		var secret  = secrets.pusherSecret ?: "";
+		if ( !len( appId ) || !len( secret ) ){
+			throw( type = "cbqm.MissingPusherCredentials", message = "Broadcast Connection is missing the Pusher appId/secret" );
+		}
+
+		var signed = signedRequest(
+			appId     = appId,
+			key       = arguments.broadcast.pusherKey ?: "",
+			secret    = secret,
+			cluster   = arguments.broadcast.pusherCluster ?: "",
+			channel   = arguments.channel,
+			event     = arguments.event,
+			payload   = arguments.payload,
+			timestamp = int( createObject( "java", "java.lang.System" ).currentTimeMillis() / 1000 )
+		);
+
+		return send( signed );
+	}
+
+	// ---- helpers -----------------------------------------------------------
+
+	/**
+	 * Perform the HTTP POST. Isolated so the publish path stays one small, mockable seam.
+	 *
+	 * @signed { url, body, headers } from signedRequest().
+	 *
+	 * @return struct { status, success, body }
+	 */
+	private struct function send( required struct signed ){
+		var result = "";
+		bx:http
+			url    = arguments.signed.url
+			method = "POST"
+			result = "result"
+		{
+			bx:httpparam type="header" name="Content-Type" value=arguments.signed.headers[ "Content-Type" ];
+			bx:httpparam type="body"   value=arguments.signed.body;
+		}
+
+		var statusCode = val( listFirst( result.statusCode ?: "0", " " ) );
+		return {
+			"status"  : statusCode,
+			"success" : statusCode == 200,
+			"body"    : result.fileContent ?: ""
+		};
+	}
+
+	/**
+	 * Build the canonical (key-sorted) `a=b&c=d` query string used both in the signed URL and in
+	 * the string-to-sign. Pusher's params are simple ASCII so no extra URL-encoding is needed.
+	 */
+	private string function sortedQueryString( required struct params ){
+		var p    = arguments.params;
+		var keys = structKeyArray( p ).sort( "textnocase" );
+		return keys.map( ( k ) => "#k#=#p[ k ]#" ).toList( "&" );
+	}
+
+}

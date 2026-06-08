@@ -51,6 +51,11 @@ export const api = {
   // realtime (Live Monitor) — public broadcast config for a Connection (never the secret)
   connectionBroadcast: (cid) => request('GET', `/connections/${cid}/broadcast`),
 
+  // DEV-ONLY: fire a synthetic Worker event over the real transport so the operator can prove the
+  // Live Monitor receives (#22). The backend hard-gates this to the development environment (404
+  // otherwise) and publishes server-side — the Pusher secret never reaches the browser.
+  devEmit: (cid, body) => request('POST', `/dev/connections/${cid}/emit`, { body }),
+
   // broadcast connections (admin) — reusable realtime transports; list/get never return the secret
   listBroadcasts: () => request('GET', '/broadcasts'),
   createBroadcast: (data) => request('POST', '/broadcasts', { body: data }),
