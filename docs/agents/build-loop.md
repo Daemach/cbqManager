@@ -25,10 +25,27 @@ interval) or via the ralph-loop plugin, feeding the SAME prompt back each time.
 ## LOOP PROMPT (copy from here)
 
 You are running ONE iteration of the cbqManager autonomous build loop. Assume you have NO memory of
-prior iterations — re-derive all context from the repository every time. Work on Windows via the
-**Bash tool** (git, gh, box, yarn, node all resolve there; `gh` via the `~/bin/gh` shim). Use
-camelCase. One slice per iteration; commit and push **directly to `main`**; tests MUST be green
-before any push.
+prior iterations — re-derive all context from the repository every time. Work via the **Bash tool**
+(git, gh, box, yarn, node all resolve directly). The canonical working copy is the local-disk
+sandbox at `/Users/johnw/sandbox/dev/Synaptrix/cbqManager` (macOS) — NOT the old
+`/Volumes/.../​_tempCopyToMac` network-share copy, which was abandoned because SQLite WAL/locking
+don't work over SMB. Use camelCase. One slice per iteration; commit and push **directly to `main`**;
+tests MUST be green before any push.
+
+### Environment & servers (keep BOTH up across iterations)
+
+- **Backend** (BoxLang/ColdBox) runs from this copy on **port 60472** (`box server start`; webroot
+  `public`). After editing backend `.bx` (handlers, config, models), reload with a fwreinit
+  (`curl "http://localhost:60472/?fwreinit=1"`) or `box server restart` — never leave it down.
+- **Frontend** (Vite dev) runs on **port 9000** and proxies `/api` → `127.0.0.1:60472`. Start it
+  persistently (`nohup yarn --cwd frontend dev &`) so Playwright (`reuseExistingServer:true`) reuses
+  it instead of cycling it; keep it up so the site is always live.
+- **Own store** = SQLite at `resources/db/cbqmanager.db` (gitignored). On local disk WAL works, so the
+  Harvester and concurrent admin writes are viable here (they were not on the SMB share).
+- **Backend tests**: `box testbox run runner="http://localhost:60472/tests/runner.bxm"`.
+- Known wart: some CommandBox CLI modules (`commandbox-migrations`, `coldbox-cli`, `quick-commands`)
+  fail to load with a `BXLoader.cfc` syntax error — `box migrate` may not work via CLI; run
+  migrations through the app/runner if needed. The server itself runs fine.
 
 ### 0. Orient — read before doing anything (every iteration, no shortcuts)
 - `CONTEXT.md` — the domain glossary. Use these exact terms (Connection, Queue, Job, Failed Job,
@@ -44,8 +61,10 @@ before any push.
   before building (e.g. `cbq`, `qb`, `coldbox-handler-development`, `coldbox-rest-api-development`,
   `boxlang-testing`, `testbox-bdd`, `cbvalidation`, `cbsecurity`). Read its `SKILL.md`.
 - `git log --oneline -15`, `gh issue list --repo Daemach/cbqManager --state open` (note labels),
-  and `box server list` (reuse the running cbqManager server at its existing port; don't start a
-  duplicate). Skim the frontend (`frontend/src/`) and app (`app/`) areas your slice will touch.
+  and `box server list` — reuse the running cbqManager server (see Environment above); don't start a
+  duplicate. If a stale server is registered to the old `/Volumes` webroot, `box server forget
+  cbqManager --force` then `box server start` from this copy. Skim the frontend (`frontend/src/`) and
+  app (`app/`) areas your slice will touch.
 
 ### 1. Select the slice
 - Grab the OLDEST open issue labeled `ready-for-agent`
