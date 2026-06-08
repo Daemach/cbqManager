@@ -8,7 +8,7 @@ interval) or via the ralph-loop plugin, feeding the SAME prompt back each time.
 > ralph-loop with a hard cap and an early-exit promise:
 >
 > ```
-> /ralph-loop <LOOP PROMPT> --max-iterations 3 --completion-promise "No open `ready-for-agent` issues remain AND every slice implemented this run was merged to main via its own green PR"
+> /ralph-loop <LOOP PROMPT> --max-iterations 3 --completion-promise "No open `ready-for-agent` issues remain AND every slice implemented this run was committed and pushed to main with green tests"
 > ```
 >
 > `--max-iterations 3` stops after at most 3 slices; the completion promise stops it earlier only if
@@ -16,7 +16,9 @@ interval) or via the ralph-loop plugin, feeding the SAME prompt back each time.
 > Self-paced alternative: `/loop` then paste the prompt (shares this session's context).
 >
 > The loop drains `ready-for-agent` issues; when the backlog is dry it derives the next slice from
-> the PRDs and creates it. One reviewable slice per iteration, branch + PR, never push to `main`.
+> the PRDs and creates it. One reviewable slice per iteration, committed and pushed **directly to
+> `main`** once its tests are green. (Reset point: the original commit can be checked out to start
+> over if a run goes sideways.)
 
 ---
 
@@ -25,7 +27,8 @@ interval) or via the ralph-loop plugin, feeding the SAME prompt back each time.
 You are running ONE iteration of the cbqManager autonomous build loop. Assume you have NO memory of
 prior iterations — re-derive all context from the repository every time. Work on Windows via the
 **Bash tool** (git, gh, box, yarn, node all resolve there; `gh` via the `~/bin/gh` shim). Use
-camelCase. Never push to `main`; one slice per iteration; tests must be green before any PR.
+camelCase. One slice per iteration; commit and push **directly to `main`**; tests MUST be green
+before any push.
 
 ### 0. Orient — read before doing anything (every iteration, no shortcuts)
 - `CONTEXT.md` — the domain glossary. Use these exact terms (Connection, Queue, Job, Failed Job,
@@ -52,7 +55,7 @@ camelCase. Never push to `main`; one slice per iteration; tests must be green be
 - Slices may be **front-end, back-end, or both** (a full vertical is ideal). Keep each one reviewable.
 
 ### 2. Build
-- Branch `slice-<issue#>-<short-name>` off `main`.
+- Work on `main` (pull latest first: `git pull --rebase`). Keep the slice small and reviewable.
 - Implement following the domain language, ADRs, and the BoxLang/ColdBox guidelines. Favor deep,
   independently testable modules with simple stable interfaces; keep handlers thin. Outlined
   controls + dark mode for any UI (house style).
@@ -69,6 +72,10 @@ camelCase. Never push to `main`; one slice per iteration; tests must be green be
   (writes the LAST run's video to `frontend/test-results/`). Review it as a user would: every tab,
   screen, paging, sorting, button, and the realtime/context-switch behavior. Is it intuitive and
   correct?
+- **Inspect the Playwright traces** for every UI run (`frontend/test-results/**/trace.zip`, open with
+  `yarn --cwd frontend playwright show-trace <path>` or read the trace's console/network entries).
+  Treat ANY JavaScript console error, unhandled rejection, or failed network call as a defect —
+  fix it and re-run BEFORE committing. The browser console must be clean.
 - Back-end/infra slice: review against the PRD acceptance criteria and ADRs; confirm the public
   interface is simple, stable, and secrets never leak.
 - Honestly answer: are we still on track to the best experience? Note what's weak or missing.
@@ -79,13 +86,16 @@ camelCase. Never push to `main`; one slice per iteration; tests must be green be
   discovered mid-build — the backlog bends to what you learned.
 
 ### 6. Land
-- Commit (end the message with `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`), push the
-  branch, and open a PR with `gh pr create` that `Closes #<issue>` and summarizes verification
-  (test counts, walkthrough evidence). Leave local-only config (`.claude/`, `.vscode/`) out of the
-  commit. Then STOP — the next iteration starts fresh.
+- Commit (end the message with `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`) and push
+  **directly to `main`** (`git pull --rebase` first, then `git push origin main`). The commit body
+  should reference the issue (`Closes #<issue>`) and summarize verification (test counts, walkthrough
+  evidence). Leave local-only config (`.claude/`, `.vscode/`) out of the commit. Then STOP — the next
+  iteration starts fresh.
 
 ### Guardrails
-- Branch + PR per slice; never push to `main`; green before PR.
+- One slice per iteration; push straight to `main`; tests MUST be green before any push.
+- For any UI slice, inspect the Playwright traces and fix ALL JavaScript/console errors before
+  committing — a clean browser console is a precondition for the push.
 - Reuse the running server; don't duplicate it. If migrations are needed: `box migrate up`.
 - If a step is genuinely blocked (missing creds, unreachable service, ambiguous spec), comment the
   blocker on the issue, relabel it `needs-info`, and pick the next `ready-for-agent` instead of
