@@ -1,0 +1,43 @@
+/**
+ * Broadcasts — admin CRUD over the encrypted Broadcast Connection Registry (admin-only; ADR-0003,
+ * ADR-0006). A Broadcast Connection is a reusable realtime transport (pusher|socketbox) + its
+ * server credentials, referenced by Connections to drive the Live Monitor. Secret fields (Pusher
+ * appId/secret, socketbox auth) are encrypted at rest and NEVER returned to the client.
+ *
+ * Secured with the `broadcast.*` capability, which Authorization.capabilityFor() maps to the admin
+ * tier (^broadcast\. => admin), so only admins may manage Broadcast Connections.
+ */
+class extends="BaseApiHandler" {
+
+	property name="registry" inject="ConnectionRegistry";
+
+	/**
+	 * List Broadcast Connections WITHOUT secrets (PUBLIC params only — id/name/transport/public keys).
+	 */
+	function index( event, rc, prc ){
+		if ( !secure( event, "broadcast.list" ) ) return;
+		event.getResponse().setData( registry.listBroadcast() );
+	}
+
+	function create( event, rc, prc ){
+		if ( !secure( event, "broadcast.create" ) ) return;
+		var id = registry.createBroadcast( rc );
+		audit( "broadcast.create", { targetType : "broadcast", targetId : id } );
+		event.getResponse().setData( { "id" : id } );
+	}
+
+	function update( event, rc, prc ){
+		if ( !secure( event, "broadcast.update" ) ) return;
+		registry.updateBroadcast( rc.id, rc );
+		audit( "broadcast.update", { targetType : "broadcast", targetId : rc.id } );
+		event.getResponse().addMessage( "Broadcast Connection updated" );
+	}
+
+	function remove( event, rc, prc ){
+		if ( !secure( event, "broadcast.delete" ) ) return;
+		registry.removeBroadcast( rc.id );
+		audit( "broadcast.delete", { targetType : "broadcast", targetId : rc.id } );
+		event.getResponse().addMessage( "Broadcast Connection deleted" );
+	}
+
+}

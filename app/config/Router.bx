@@ -73,6 +73,13 @@ class {
 		// Audit (admin)
 		get(    "/api/audit", "Audit.index" )
 
+		// Broadcast Connection Registry (admin; realtime transport + encrypted secrets, ADR-0006).
+		// Item routes before the bare collection so /api/broadcasts/:id matches first.
+		put(    "/api/broadcasts/:id", "Broadcasts.update" )
+		delete( "/api/broadcasts/:id", "Broadcasts.remove" )
+		get(    "/api/broadcasts", "Broadcasts.index" )
+		post(   "/api/broadcasts", "Broadcasts.create" )
+
 		// Connection Registry item (after all sub-resources)
 		get(    "/api/connections/:id", "Connections.show" )
 		put(    "/api/connections/:id", "Connections.update" )

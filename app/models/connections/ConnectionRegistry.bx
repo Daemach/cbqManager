@@ -139,6 +139,23 @@ class {
 		return row;
 	}
 
+	/**
+	 * Update a Broadcast Connection. Mirrors update(): re-encrypts secrets ONLY when a `secrets`
+	 * struct is supplied (so editing public params without re-entering the secret keeps it intact),
+	 * and stamps modifiedDate.
+	 */
+	void function updateBroadcast( required numeric id, required struct data ){
+		var row = sanitizeBroadcast( arguments.data );
+		if ( structKeyExists( arguments.data, "secrets" ) ){
+			var env = cipher.encryptStruct( arguments.data.secrets );
+			row[ "secrets_enc" ] = env.value;
+			row[ "cipherIv" ]    = env.iv;
+			row[ "cipherAlg" ]   = env.alg;
+		}
+		row[ "modifiedDate" ] = clock.nowUtc();
+		own().from( "cbqm_broadcast_connections" ).where( "id", arguments.id ).update( row );
+	}
+
 	void function removeBroadcast( required numeric id ){
 		own().from( "cbqm_broadcast_connections" ).where( "id", arguments.id ).delete();
 	}

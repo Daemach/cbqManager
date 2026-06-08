@@ -51,6 +51,12 @@ export const api = {
   // realtime (Live Monitor) — public broadcast config for a Connection (never the secret)
   connectionBroadcast: (cid) => request('GET', `/connections/${cid}/broadcast`),
 
+  // broadcast connections (admin) — reusable realtime transports; list/get never return the secret
+  listBroadcasts: () => request('GET', '/broadcasts'),
+  createBroadcast: (data) => request('POST', '/broadcasts', { body: data }),
+  updateBroadcast: (id, data) => request('PUT', `/broadcasts/${id}`, { body: data }),
+  deleteBroadcast: (id) => request('DELETE', `/broadcasts/${id}`),
+
   // queue health + jobs
   queueHealth: (cid) => request('GET', `/connections/${cid}/health`),
   listJobs: (cid, params) => request('GET', `/connections/${cid}/jobs`, { params }),

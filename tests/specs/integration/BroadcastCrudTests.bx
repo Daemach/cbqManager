@@ -1,0 +1,172 @@
+/**
+ * Slice #8 — Broadcast Connection management (admin CRUD over the realtime transport registry).
+ *
+ * Asserts EXTERNAL behavior of the `/api/broadcasts` endpoints and the registry's updateBroadcast():
+ *   - create -> list -> update -> get public (via a linked Connection) -> delete round-trips;
+ *   - secrets (the encrypted blob + the decrypted appId/secret) NEVER leak in the list or the
+ *     Connection's public broadcast config;
+ *   - the endpoints are admin-gated (broadcast.* => admin), so an unauthenticated/viewer caller is 403;
+ *   - updateBroadcast re-encrypts secrets ONLY when supplied (editing public params keeps the secret).
+ */
+@autowire
+class extends="coldbox.system.testing.BaseTestCase" {
+
+	@inject( "ConnectionRegistry" )
+	property name="registry";
+
+	@inject( "provider:JwtService@cbsecurity" )
+	property name="jwtService";
+
+	@inject( "provider:authenticationService@cbauth" )
+	property name="cbauth";
+
+	@inject( "QueryBuilderFactory" )
+	property name="qbFactory";
+
+	function beforeAll(){ super.beforeAll(); }
+
+	// Tear down the "TEST_*" Connections / Broadcast Connections this spec creates so they don't
+	// accumulate in the dev own store on every `box testbox run` (mirrors the sibling specs).
+	function afterAll(){
+		var own = variables.qbFactory.forOwnStore();
+		own.from( "cbqm_connections" ).where( "name", "like", "TEST_%" ).delete();
+		own.from( "cbqm_broadcast_connections" ).where( "name", "like", "TEST_%" ).delete();
+		super.afterAll();
+	}
+
+	function run(){
+		describe( "Broadcast Connection CRUD (admin)", () => {
+
+			beforeEach( ( currentSpec ) => {
+				setup();
+				cbauth.logout();
+				jwtService.getTokenStorage().clearAll();
+			} );
+
+			it( "POST/GET/PUT/DELETE /api/broadcasts round-trips, never leaking the secret", () => {
+				var token  = jwtService.attempt( "admin", "password" );
+				var secret = "crud-secret-#getTickCount()#";
+				var name   = "TEST_BC_CRUD_#getTickCount()#";
+
+				// --- create ---
+				var createEvent = this.post(
+					route  = "/api/broadcasts",
+					params = {
+						"x-auth-token" : token,
+						"name"         : name,
+						"transport"    : "pusher",
+						"pusherKey"    : "pk_crud",
+						"pusherCluster": "us2",
+						"secrets"      : { "pusherAppId" : "app-crud", "pusherSecret" : secret }
+					}
+				);
+				var createResp = createEvent.getPrivateValue( "Response" );
+				expect( createResp.getError() ).toBeFalse( createResp.getMessages().toString() );
+				var id = createResp.getData().id;
+				expect( id ).toBeNumeric();
+				expect( id ).notToBe( 0 );
+
+				try {
+					// --- list: contains the new row with PUBLIC params, no secret anywhere ---
+					var listEvent = this.get( route = "/api/broadcasts", params = { "x-auth-token" : token } );
+					var listResp  = listEvent.getPrivateValue( "Response" );
+					expect( listResp.getError() ).toBeFalse();
+					var rows  = listResp.getData();
+					var found = rows.filter( ( r ) => r.name == name );
+					expect( found ).toHaveLength( 1 );
+					expect( found[ 1 ].pusherKey ).toBe( "pk_crud" );
+					expect( found[ 1 ] ).notToHaveKey( "secrets_enc" );
+					expect( found[ 1 ] ).notToHaveKey( "secrets" );
+					expect( jsonSerialize( rows ) ).notToInclude( secret );
+					expect( jsonSerialize( rows ) ).notToInclude( "app-crud" );
+
+					// --- update: change PUBLIC params with NO secrets -> secret must survive ---
+					var updEvent = this.put(
+						route  = "/api/broadcasts/#id#",
+						params = {
+							"x-auth-token" : token,
+							"id"           : id,
+							"name"         : name,
+							"transport"    : "pusher",
+							"pusherKey"    : "pk_crud_updated",
+							"pusherCluster": "eu"
+						}
+					);
+					expect( updEvent.getPrivateValue( "Response" ).getError() ).toBeFalse();
+
+					// public param changed; secret unchanged (resolveBroadcast is internal — secret stays)
+					var resolved = registry.resolveBroadcast( id );
+					expect( resolved.pusherKey ).toBe( "pk_crud_updated" );
+					expect( resolved.pusherCluster ).toBe( "eu" );
+					expect( resolved.secrets.pusherSecret ).toBe( secret, "secret must survive a public-only update" );
+
+					// --- the secret never leaks through a linked Connection's PUBLIC broadcast config ---
+					var connId = registry.create( {
+						"name"                  : "TEST_CONN_CRUD_#getTickCount()#",
+						"environment"           : "development",
+						"grammar"               : "mssql",
+						"datasourceClass"       : "com.microsoft.sqlserver.jdbc.SQLServerDriver",
+						"connectionString"      : "jdbc:sqlserver://localhost:1433;databaseName=X",
+						"secrets"               : { "username" : "sa", "password" : "p" },
+						"broadcastConnectionId" : id,
+						"channel"               : "development",
+						"events"                : "cbqWorker,cbqWorkerError"
+					} );
+					try {
+						var pub = registry.publicBroadcastFor( connId );
+						expect( pub.realtime ).toBeTrue();
+						expect( pub.publicParams.pusherKey ).toBe( "pk_crud_updated" );
+						expect( jsonSerialize( pub ) ).notToInclude( secret );
+					} finally {
+						registry.remove( connId );
+					}
+
+					// --- update WITH a new secret -> it is re-encrypted ---
+					var newSecret = "rotated-#getTickCount()#";
+					this.put(
+						route  = "/api/broadcasts/#id#",
+						params = {
+							"x-auth-token" : token,
+							"id"           : id,
+							"transport"    : "pusher",
+							"secrets"      : { "pusherAppId" : "app-crud", "pusherSecret" : newSecret }
+						}
+					);
+					expect( registry.resolveBroadcast( id ).secrets.pusherSecret ).toBe( newSecret );
+				} finally {
+					// --- delete ---
+					var delEvent = this.delete( route = "/api/broadcasts/#id#", params = { "x-auth-token" : token } );
+					expect( delEvent.getPrivateValue( "Response" ).getError() ).toBeFalse();
+				}
+
+				// gone from the registry
+				var rawAfter = qbFactory.forOwnStore().from( "cbqm_broadcast_connections" ).where( "id", id ).first();
+				expect( isNull( rawAfter ) || structIsEmpty( rawAfter ) ).toBeTrue( "deleted Broadcast Connection must be gone" );
+			} );
+
+			it( "is admin-gated: an unauthenticated (viewer) caller gets 403 on every verb", () => {
+				// No token -> the actor defaults to the viewer role; broadcast.* requires admin.
+				var listResp = this.get( route = "/api/broadcasts" ).getPrivateValue( "Response" );
+				expect( listResp.getStatusCode() ).toBe( 403 );
+
+				var createResp = this.post(
+					route  = "/api/broadcasts",
+					params = { "name" : "TEST_BC_FORBIDDEN", "transport" : "pusher", "secrets" : {} }
+				).getPrivateValue( "Response" );
+				expect( createResp.getStatusCode() ).toBe( 403 );
+
+				var updResp = this.put( route = "/api/broadcasts/1", params = { "id" : 1, "name" : "x" } ).getPrivateValue( "Response" );
+				expect( updResp.getStatusCode() ).toBe( 403 );
+
+				var delResp = this.delete( route = "/api/broadcasts/1" ).getPrivateValue( "Response" );
+				expect( delResp.getStatusCode() ).toBe( 403 );
+
+				// nothing was created by the forbidden POST
+				var leaked = qbFactory.forOwnStore().from( "cbqm_broadcast_connections" ).where( "name", "TEST_BC_FORBIDDEN" ).first();
+				expect( isNull( leaked ) || structIsEmpty( leaked ) ).toBeTrue();
+			} );
+
+		} );
+	}
+
+}
