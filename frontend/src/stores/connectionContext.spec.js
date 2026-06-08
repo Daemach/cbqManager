@@ -1,6 +1,10 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
-import { useConnectionContextStore, DEFAULT_TOOL } from './connectionContext'
+import { nextTick } from 'vue'
+import {
+  useConnectionContextStore, DEFAULT_TOOL,
+  readTabsCookie, writeTabsCookie, setCookieDoc, createCookieJar
+} from './connectionContext'
 
 const conn = (id, name = `c${id}`) => ({ id, name, environment: 'development' })
 
@@ -8,6 +12,8 @@ describe('ConnectionContextStore', () => {
   let ctx
   beforeEach(() => {
     setActivePinia(createPinia())
+    // Fresh in-memory cookie jar per test (env is `node`, so there is no real document.cookie).
+    setCookieDoc(createCookieJar())
     ctx = useConnectionContextStore()
   })
 
@@ -109,6 +115,98 @@ describe('ConnectionContextStore', () => {
       ctx.closeTab(99)
       expect(ctx.count).toBe(1)
       expect(ctx.activeId).toBe('1')
+    })
+  })
+
+  // --- cookie persistence / rehydration (Console layout v2, issue #18) -------------------------
+  describe('persistence & rehydration', () => {
+    it('snapshot captures open ids, active, and each tab lastTool', () => {
+      ctx.openTab(conn(1))
+      ctx.openTab(conn(2))
+      ctx.rememberTool(1, 'jobs')
+      ctx.activateTab(1)
+      expect(ctx.snapshot()).toEqual({
+        tabs: [ { connectionId: '1', lastTool: 'jobs' }, { connectionId: '2', lastTool: DEFAULT_TOOL } ],
+        activeId: '1'
+      })
+    })
+
+    it('persists the open set to a cookie on change and rehydrates the same tabs/active/lastTool', async () => {
+      ctx.openTab(conn(1))
+      ctx.openTab(conn(2))
+      ctx.rememberTool(2, 'failed')
+      ctx.activateTab(1)
+      await nextTick() // the deep watcher persists asynchronously
+
+      const saved = readTabsCookie()
+      expect(saved.tabs).toEqual([
+        { connectionId: '1', lastTool: DEFAULT_TOOL },
+        { connectionId: '2', lastTool: 'failed' }
+      ])
+      expect(saved.activeId).toBe('1')
+
+      // Simulate a reload: a brand-new store instance rehydrates from the cookie.
+      setActivePinia(createPinia())
+      const fresh = useConnectionContextStore()
+      expect(fresh.count).toBe(0)
+      expect(fresh.rehydrate()).toBe(true)
+      expect(fresh.tabs.map((t) => t.connectionId)).toEqual([ '1', '2' ])
+      expect(fresh.tabs.find((t) => t.connectionId === '2').lastTool).toBe('failed')
+      expect(fresh.activeId).toBe('1')
+    })
+
+    it('rehydrate returns false when no cookie is saved', () => {
+      expect(ctx.rehydrate()).toBe(false)
+      expect(ctx.count).toBe(0)
+    })
+
+    it('rehydrate falls back to the first tab when the saved activeId is no longer open', () => {
+      writeTabsCookie({ tabs: [ { connectionId: '5', lastTool: 'jobs' } ], activeId: '999' })
+      expect(ctx.rehydrate()).toBe(true)
+      expect(ctx.activeId).toBe('5')
+    })
+
+    it('ignores a corrupt cookie value', () => {
+      const jar = createCookieJar()
+      jar.cookie = 'cbqm_tabs=not-json; path=/'
+      setCookieDoc(jar)
+      expect(readTabsCookie()).toBeNull()
+      expect(ctx.rehydrate()).toBe(false)
+    })
+  })
+
+  describe('bootFrom', () => {
+    it('restores saved tabs from the cookie when present (ignores the connection list)', () => {
+      writeTabsCookie({ tabs: [ { connectionId: '2', lastTool: 'batches' } ], activeId: '2' })
+      const ok = ctx.bootFrom([ conn(1), conn(2), conn(3) ])
+      expect(ok).toBe(true)
+      expect(ctx.tabs.map((t) => t.connectionId)).toEqual([ '2' ])
+      expect(ctx.activeTab.lastTool).toBe('batches')
+      expect(ctx.activeId).toBe('2')
+    })
+
+    it('auto-opens the FIRST Connection when nothing was saved', () => {
+      const ok = ctx.bootFrom([ conn(10, 'prod'), conn(11, 'dev') ])
+      expect(ok).toBe(true)
+      expect(ctx.count).toBe(1)
+      expect(ctx.activeId).toBe('10')
+      expect(ctx.activeTab.name).toBe('prod')
+      expect(ctx.activeTab.lastTool).toBe(DEFAULT_TOOL)
+    })
+
+    it('returns false (no context) when there is nothing saved and no Connections exist', () => {
+      expect(ctx.bootFrom([])).toBe(false)
+      expect(ctx.count).toBe(0)
+      expect(ctx.activeId).toBeNull()
+    })
+
+    it('does not clobber an already-open tab (a deep link wins)', () => {
+      ctx.openTab(conn(7, 'deeplinked'))
+      writeTabsCookie({ tabs: [ { connectionId: '1', lastTool: 'jobs' } ], activeId: '1' })
+      const ok = ctx.bootFrom([ conn(1), conn(2) ])
+      expect(ok).toBe(true)
+      expect(ctx.tabs.map((t) => t.connectionId)).toEqual([ '7' ])
+      expect(ctx.activeId).toBe('7')
     })
   })
 })

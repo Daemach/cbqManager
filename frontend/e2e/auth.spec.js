@@ -7,7 +7,7 @@ test.describe('Authentication', () => {
     await expect(page.getByRole('button', { name: 'Sign in' })).toBeVisible()
   })
 
-  test('admin can log in and reach the Connections dashboard', async ({ page }) => {
+  test('admin can log in and reach the console shell', async ({ page }) => {
     const errors = collectErrors(page)
     await loginAndOpenApp(page)
     // No client-side runtime errors (catches QPage-without-QLayout, etc.)

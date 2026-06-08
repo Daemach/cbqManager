@@ -7,8 +7,11 @@ const routes = [
     path: '/',
     component: () => import('@/layouts/MainLayout.vue'),
     children: [
-      { path: '', redirect: { name: 'connections' } },
-      { path: 'connections', name: 'connections', component: () => import('@/views/ConnectionsView.vue') },
+      // The shell opens straight into a working context: MainLayout's boot restores saved tabs from
+      // the cookie (or auto-opens the first Connection) and navigates to the active tab's tool. The
+      // empty landing shows only while that resolves. The standalone Connections page is gone —
+      // Connection CRUD now lives in the toolbar picker (Console layout v2, issue #18).
+      { path: '', name: 'home', component: () => import('@/views/HomeView.vue') },
       // Connection-scoped tools
       { path: 'c/:connectionId/health', name: 'health', component: () => import('@/views/QueueHealthView.vue'), props: true },
       { path: 'c/:connectionId/jobs', name: 'jobs', component: () => import('@/views/JobsView.vue'), props: true },

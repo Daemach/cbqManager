@@ -27,10 +27,26 @@ export async function login(page, creds = DEFAULT_ADMIN) {
   await page.getByRole('button', { name: 'Sign in' }).click()
 }
 
-/** Log in and wait for the app shell (Connections dashboard) to render. */
+/**
+ * Log in and wait for the app shell to render. Console layout v2 (issue #18) has no Connections
+ * dashboard — the shell is the toolbar (with the Connections picker) + the persistent Live Monitor
+ * dock. We wait on the picker button, which is always present once the layout mounts.
+ */
 export async function loginAndOpenApp(page, creds = DEFAULT_ADMIN) {
   await login(page, creds)
   await expect(page.getByText('cbqManager')).toBeVisible()
-  // Unique to the Connections view (avoids the ambiguous "Connections" label in the drawer)
-  await expect(page.getByRole('button', { name: 'Add Connection' })).toBeVisible()
+  await expect(page.locator('[data-test=connection-picker]')).toBeVisible()
+}
+
+/**
+ * Open the toolbar Connection picker menu (the rich picker that replaced the q-select + the
+ * Connections page). Quasar's menu open can flake on a single click, so retry until it's visible.
+ */
+export async function openPicker(page) {
+  const menu = page.locator('[data-test=connection-menu]')
+  await expect(async () => {
+    await page.locator('[data-test=connection-picker]').click()
+    await expect(menu).toBeVisible({ timeout: 1000 })
+  }).toPass({ timeout: 10000 })
+  return menu
 }

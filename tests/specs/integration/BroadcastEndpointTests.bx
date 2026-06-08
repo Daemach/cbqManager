@@ -110,6 +110,19 @@ class extends="coldbox.system.testing.BaseTestCase" {
 				}
 			} );
 
+			it( "degrades to realtime:false for a Connection that no longer exists (lazy-subscribe race)", () => {
+				// The Live Monitor's lazy per-tab subscribe (issue #18) can request broadcast config for a
+				// Connection that was just deleted (a tab outlives its Connection). That race must degrade
+				// gracefully to a well-formed realtime:false result, not throw a 500.
+				var pub = registry.publicBroadcastFor( 999999 );
+				expect( pub.realtime ).toBeFalse();
+				expect( pub.transport ).toBe( "" );
+				expect( pub.channel ).toBe( "" );
+				expect( pub.publicParams ).toBeEmpty();
+				expect( pub.events ).toBeArray();
+				expect( pub.events ).toBeEmpty();
+			} );
+
 			it( "GET /api/connections/:id/broadcast returns the public config and never the secret", () => {
 				var secret = "endpoint-secret-#getTickCount()#";
 				var bcId   = registry.createBroadcast( {

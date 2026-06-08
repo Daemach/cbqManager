@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { loginAndOpenApp } from './support/app.js'
+import { loginAndOpenApp, openPicker } from './support/app.js'
 import { authHeader } from './support/api.js'
 
 // Connection context tabs (PRD-0002 top zone). Tabs are driven through the real SPA; live activity
@@ -39,16 +39,11 @@ async function waitActive(page, cid) {
   )
 }
 
-// Open a tab via the header picker. The picker list is loaded at mount, so callers must reload
-// after creating Connections for them to appear.
+// Open a tab via the rich toolbar picker (the per-row Open button). The picker list is loaded at
+// mount, so callers must reload after creating Connections for them to appear.
 async function openViaPicker(page, conn) {
-  const menu = page.locator('.q-menu')
-  // Quasar's dropdown open can flake on a single click (focus/animation timing) — retry until open.
-  await expect(async () => {
-    await page.locator('[data-test=connection-picker]').click()
-    await expect(menu).toBeVisible({ timeout: 1000 })
-  }).toPass({ timeout: 10000 })
-  await menu.locator('.q-item').filter({ hasText: conn.name }).first().click()
+  const menu = await openPicker(page)
+  await menu.locator(`[data-test=open-${conn.id}]`).click()
   await expect(page.locator(`[data-test=tab-${conn.id}]`)).toBeVisible()
   await waitActive(page, conn.id)
 }
@@ -148,6 +143,33 @@ test.describe('Connection context tabs', () => {
       await deleteConn(page, a.id)
       await deleteConn(page, b.id)
       await deleteConn(page, c.id)
+    }
+  })
+
+  test('reload restores the open tabs, the active tab, and each tab last tool (cookie)', async ({ page }) => {
+    await loginAndOpenApp(page)
+    const a = await createConn(page, `e2e-tab-restore-a-${Date.now()}`)
+    const b = await createConn(page, `e2e-tab-restore-b-${Date.now()}`)
+    try {
+      await openByNav(page, a)
+      await page.locator('[data-test=tool-jobs]').click() // remember A on Jobs
+      await expect(page).toHaveURL(new RegExp(`/c/${a.id}/jobs`))
+      await openByNav(page, b) // active = b on health
+
+      // Make A the active tab so we can assert the active-tab restoration too.
+      await page.locator(`[data-test=tab-${a.id}]`).click()
+      await expect(page).toHaveURL(new RegExp(`/c/${a.id}/jobs`))
+
+      // Reload: the cookie must rehydrate both tabs, the active one (A), and A's last tool (Jobs).
+      await page.reload()
+      await expect(page.locator(`[data-test=tab-${a.id}]`)).toBeVisible()
+      await expect(page.locator(`[data-test=tab-${b.id}]`)).toBeVisible()
+      await waitActive(page, a.id)
+      await expect(isActive(page, a.id)).toBeVisible()
+      await expect(page).toHaveURL(new RegExp(`/c/${a.id}/jobs`)) // resumed A's last tool
+    } finally {
+      await deleteConn(page, a.id)
+      await deleteConn(page, b.id)
     }
   })
 

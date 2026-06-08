@@ -36,7 +36,7 @@ async function onLogin() {
     const res = await api.login(username.value, password.value)
     // The login response shape follows cbsecurity JWT (token in data). Adjust if needed.
     setToken(res.data?.access_token || res.data || res.token)
-    router.push(route.query.redirect || { name: 'connections' })
+    router.push(route.query.redirect || { name: 'home' })
   } catch (e) {
     $q.notify({ type: 'negative', message: e.message || 'Login failed' })
   } finally {
