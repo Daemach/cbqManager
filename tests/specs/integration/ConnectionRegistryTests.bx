@@ -19,7 +19,21 @@ class extends="coldbox.system.testing.BaseTestCase" {
 	property name="qbFactory";
 
 	function beforeAll(){ super.beforeAll(); }
-	function afterAll(){ super.afterAll(); }
+
+	// Tear down any rows this spec leaked into the dev own store. The specs create Connections and
+	// Broadcast Connections named "TEST_*"; without this they accumulate every `box testbox run`,
+	// bloat cbqmanager.db, and push real rows onto later pages in the Connections UI (regression
+	// that broke connections-ui.spec.js once 5+ leaked).
+	function afterAll(){
+		purgeTestRows();
+		super.afterAll();
+	}
+
+	private function purgeTestRows(){
+		var own = variables.qbFactory.forOwnStore();
+		own.from( "cbqm_connections" ).where( "name", "like", "TEST_%" ).delete();
+		own.from( "cbqm_broadcast_connections" ).where( "name", "like", "TEST_%" ).delete();
+	}
 
 	function run(){
 		describe( "ConnectionRegistry & dev fixture (Phase 1)", () => {

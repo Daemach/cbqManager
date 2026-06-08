@@ -19,8 +19,19 @@ class extends="coldbox.system.testing.BaseTestCase" {
 	@inject( "provider:authenticationService@cbauth" )
 	property name="cbauth";
 
+	@inject( "QueryBuilderFactory" )
+	property name="qbFactory";
+
 	function beforeAll(){ super.beforeAll(); }
-	function afterAll(){ super.afterAll(); }
+
+	// Tear down the "TEST_*" Connections/Broadcast Connections this spec creates so they don't
+	// accumulate in the dev own store on every `box testbox run` (see ConnectionRegistryTests).
+	function afterAll(){
+		var own = variables.qbFactory.forOwnStore();
+		own.from( "cbqm_connections" ).where( "name", "like", "TEST_%" ).delete();
+		own.from( "cbqm_broadcast_connections" ).where( "name", "like", "TEST_%" ).delete();
+		super.afterAll();
+	}
 
 	function run(){
 		describe( "Broadcast config (Live Monitor) contract", () => {
