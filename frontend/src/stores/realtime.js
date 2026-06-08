@@ -16,6 +16,7 @@ import { api } from '@/services/api'
 import { createRealtime } from '@/services/realtime'
 import { normalizeEvent } from '@/services/realtime/eventNormalizer'
 import { applyFilter } from '@/services/realtime/liveEventFilter'
+import { eventsWithinWindow, eventTimeMs, pruneHistory } from '@/services/realtime/lookbackWindow'
 
 const adapters = new Map() // connectionId(string) -> realtime adapter
 const timers = new Map() // connectionId(string) -> auto-resume timeout id
@@ -25,16 +26,25 @@ export const useRealtimeStore = defineStore('realtime', () => {
   const activeId = ref(null)
   const maxEvents = ref(500)
   const autoResumeMs = ref(12000) // pause auto-resumes after this (0 = disabled)
+  // Time-bounded retained history: independent of the 500-row VISIBLE cap. Kept at least as wide as
+  // the widest lookback option so "current feed + last N minutes" (#19) can surface an event that
+  // already scrolled off the visible feed. Client-only this slice; durable persistence is #20.
+  const historyRetentionMs = ref(30 * 60000) // retain ~30 min of activity
+
+  // Injectable clock so a unit/e2e test can drive the lookback window without Date.now flakiness.
+  const nowMs = ref(() => Date.now())
 
   function newContext() {
     return {
       events: [], // visible feed, newest-first, capped to maxEvents
+      history: [], // time-bounded retained history (newest-first), pruned to historyRetentionMs
       heldCount: 0, // events dropped while paused (surfaced so a paused dock isn't silently stale)
       streaming: true,
       status: 'idle', // idle | connecting | live | disabled | error
       config: null, // { realtime, transport, channel, events, publicParams }
       badge: { total: 0, error: 0 }, // per-context activity (feeds the future context tabs)
-      filter: {} // per-context filter spec (preserved across tab switches)
+      filter: {}, // per-context filter spec (preserved across tab switches)
+      lookbackMinutes: 0 // 0 = live feed only; >0 = search the retained window of the last N minutes
     }
   }
 
@@ -55,6 +65,11 @@ export const useRealtimeStore = defineStore('realtime', () => {
     // Badges accrue even while paused / unfocused, so a backgrounded context still signals activity.
     ctx.badge.total++
     if (ev.type === 'error') ctx.badge.error++
+
+    // Retained history accrues regardless of pause so the lookback window stays complete — pause only
+    // freezes the VISIBLE feed, it must not blind the "last N minutes" search.
+    ctx.history.unshift(ev)
+    pruneHistory(ctx.history, nowMs.value(), historyRetentionMs.value / 60000)
 
     if (!ctx.streaming) {
       ctx.heldCount++
@@ -174,24 +189,40 @@ export const useRealtimeStore = defineStore('realtime', () => {
   // tool drill-downs to auto-apply e.g. { queue } without clobbering a manual state/text filter, and
   // by the dock's per-field inputs — the store's per-context `filter` is the single source of truth.
   function mergeFilter(cid, partial) { const c = ensureContext(cid); c.filter = { ...c.filter, ...(partial || {}) } }
-  function clearFeed(cid) { const c = ensureContext(cid); c.events = []; c.heldCount = 0 }
+  function clearFeed(cid) { const c = ensureContext(cid); c.events = []; c.history = []; c.heldCount = 0 }
   function badgeFor(cid) { return contexts[String(cid)]?.badge ?? { total: 0, error: 0 } }
+  // Lookback ('current feed + last N minutes', #19): 0 = live visible feed only; >0 searches the
+  // retained per-context history window. Per-context (preserved across tab switches), client-only
+  // this slice (durable persistence is #20).
+  function setLookback(cid, minutes) { ensureContext(cid).lookbackMinutes = Math.max(0, Number(minutes) || 0) }
 
   const activeContext = computed(() => (activeId.value == null ? null : contexts[String(activeId.value)] || null))
   const activeFilter = computed(() => activeContext.value?.filter ?? {})
   const activeEvents = computed(() => activeContext.value?.events ?? [])
-  const activeFiltered = computed(() => applyFilter(activeEvents.value, activeFilter.value))
+  const activeHistory = computed(() => activeContext.value?.history ?? [])
+  const activeLookback = computed(() => activeContext.value?.lookbackMinutes ?? 0)
+
+  // The displayed feed: with lookback OFF, the live (capped) visible feed filtered; with lookback ON,
+  // the retained-history events within the last N minutes, filtered the same way — so the same
+  // combinable filters narrow either source. Composition is the two PURE helpers (window then filter).
+  const activeFiltered = computed(() => {
+    const mins = activeLookback.value
+    const source = mins > 0
+      ? eventsWithinWindow(activeHistory.value, nowMs.value(), mins)
+      : activeEvents.value
+    return applyFilter(source, activeFilter.value)
+  })
   const activeStreaming = computed(() => activeContext.value?.streaming ?? true)
   const activeStatus = computed(() => activeContext.value?.status ?? 'idle')
   const activeHeldCount = computed(() => activeContext.value?.heldCount ?? 0)
 
   return {
-    contexts, activeId, maxEvents, autoResumeMs,
+    contexts, activeId, maxEvents, autoResumeMs, historyRetentionMs, nowMs,
     ensureContext, pushEvent, injectActive,
     subscribe, unsubscribe, setActive, closeContext,
     pause, resume, toggleStreaming,
-    setFilter, mergeFilter, clearFeed, badgeFor,
-    activeContext, activeFilter, activeEvents, activeFiltered,
+    setFilter, mergeFilter, clearFeed, badgeFor, setLookback,
+    activeContext, activeFilter, activeEvents, activeHistory, activeLookback, activeFiltered,
     activeStreaming, activeStatus, activeHeldCount
   }
 })

@@ -33,7 +33,34 @@
         @remove="clearQueueFilter"
       >queue: {{ queueFilter }}</q-chip>
 
+      <!-- Instance quick filter (click a Worker badge in the feed) — removable in one click (#19). -->
+      <q-chip
+        v-if="instanceFilter"
+        dense removable square
+        color="primary" text-color="white"
+        class="q-ml-sm"
+        icon="dns"
+        data-test="monitor-instance-filter"
+        @remove="clearInstanceFilter"
+      >instance: {{ instanceFilter }}</q-chip>
+
       <q-space />
+
+      <!-- Lookback ('current feed + last N minutes', #19): search the retained history window, not
+           just the live (capped) feed, to find a just-happened error. Per-context, outlined. -->
+      <q-icon name="history" class="q-mr-xs text-grey-5">
+        <q-tooltip>Lookback: search the last N minutes of retained activity</q-tooltip>
+      </q-icon>
+      <q-btn-toggle
+        v-model="lookback"
+        dense unelevated no-caps
+        toggle-color="primary"
+        color="grey-9"
+        text-color="grey-4"
+        class="dock-lookback q-mr-sm"
+        :options="lookbackOptions"
+        data-test="dock-lookback"
+      />
 
       <q-btn
         dense flat round
@@ -100,7 +127,16 @@
               </td>
               <td class="text-no-wrap">{{ e.state || '—' }}</td>
               <td class="text-no-wrap">
-                <q-badge v-if="e.instance" :style="{ background: colorForInstance(e.instance) }">{{ e.instance }}</q-badge>
+                <q-badge
+                  v-if="e.instance"
+                  class="instance-badge cursor-pointer"
+                  :style="{ background: colorForInstance(e.instance) }"
+                  data-test="monitor-instance-badge"
+                  @click="filterByInstance(e.instance)"
+                >
+                  {{ e.instance }}
+                  <q-tooltip>Filter the feed to instance {{ e.instance }}</q-tooltip>
+                </q-badge>
                 <span v-else class="text-grey-7">—</span>
               </td>
               <td class="text-no-wrap">{{ e.mapping || '—' }}</td>
@@ -150,6 +186,25 @@ const fText = filterField('text')
 // The auto-applied (or manual) Queue filter, surfaced as a removable chip and clearable in one click.
 const queueFilter = computed(() => store.activeFilter?.queue || '')
 function clearQueueFilter() { if (store.activeId != null) store.mergeFilter(store.activeId, { queue: '' }) }
+
+// Instance/server as a first-class quick filter (#19): clicking a Worker badge in the feed applies a
+// removable instance chip, mirroring the queue drill-down (#11). One-click clearable.
+const instanceFilter = computed(() => store.activeFilter?.instance || '')
+function filterByInstance(instance) { if (store.activeId != null) store.mergeFilter(store.activeId, { instance: instance || '' }) }
+function clearInstanceFilter() { if (store.activeId != null) store.mergeFilter(store.activeId, { instance: '' }) }
+
+// Lookback ('current feed + last N minutes', #19): 0 = live feed only; >0 searches the retained
+// per-context history window. Per-context source of truth in the store (preserved across tab switches).
+const lookbackOptions = [
+  { label: 'Live', value: 0 },
+  { label: '5m', value: 5 },
+  { label: '10m', value: 10 },
+  { label: '15m', value: 15 }
+]
+const lookback = computed({
+  get: () => store.activeLookback || 0,
+  set: (v) => { if (store.activeId != null) store.setLookback(store.activeId, v || 0) }
+})
 
 const statusLabel = computed(() => ({
   idle: 'idle', connecting: 'connecting…', live: 'live', disabled: 'no realtime', error: 'error'
@@ -230,5 +285,13 @@ onBeforeUnmount(stopResize)
 }
 .row-error {
   background: rgba(244, 67, 54, 0.08);
+}
+/* Outlined-style lookback toggle so its edges read in dark mode (house style). */
+.dock-lookback {
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 4px;
+}
+.instance-badge:hover {
+  filter: brightness(1.25);
 }
 </style>
