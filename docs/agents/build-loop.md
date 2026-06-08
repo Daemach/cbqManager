@@ -92,10 +92,10 @@ tests MUST be green before any push.
 
 ### 4. Evaluate (the UX / architecture pass)
 - UI slice: run the human-like walkthrough with video — `yarn --cwd frontend test:e2e:capture`
-  (writes the LAST run's video to `frontend/test-results/`). Review it as a user would: every tab,
-  screen, paging, sorting, button, and the realtime/context-switch behavior. Is it intuitive and
-  correct?
-- **Inspect the Playwright traces** for every UI run (`frontend/test-results/**/trace.zip`, open with
+  (writes the LAST run's video under `.loop-artifacts/playwright/test-results/`). Review it as a user
+  would: every tab, screen, paging, sorting, button, and the realtime/context-switch behavior. Is it
+  intuitive and correct?
+- **Inspect the Playwright traces** for every UI run (`.loop-artifacts/playwright/test-results/**/trace.zip`, open with
   `yarn --cwd frontend playwright show-trace <path>` or read the trace's console/network entries).
   Treat ANY JavaScript console error, unhandled rejection, or failed network call as a defect —
   fix it and re-run BEFORE committing. The browser console must be clean.
@@ -119,6 +119,15 @@ tests MUST be green before any push.
 - One slice per iteration; push straight to `main`; tests MUST be green before any push.
 - For any UI slice, inspect the Playwright traces and fix ALL JavaScript/console errors before
   committing — a clean browser console is a precondition for the push.
+- **Never `rm` during the loop.** `rm` requires interactive approval and will stall an unattended
+  run. Instead, direct ALL transient test output and scratch files into the single gitignored
+  `.loop-artifacts/` folder (Playwright `test-results/` + `playwright-report/`, junit XML, trace
+  extractions, temp files). Let them accumulate there across iterations — the human cleans up
+  `.loop-artifacts/` later. Use a fresh subfolder per run (e.g. `.loop-artifacts/run-<n>/`) rather
+  than deleting the previous one. Likewise, do not delete dev-store rows ad hoc — let test teardown
+  (`afterAll`) handle test data; surface anything else for the human. On a green slice, COPY (don't
+  move) any keeper evidence (e.g. the walkthrough video, the HTML report) out to a retained location
+  if it's worth keeping; everything left in `.loop-artifacts/` stays disposable.
 - Reuse the running server; don't duplicate it. If migrations are needed: `box migrate up`.
 - If a step is genuinely blocked (missing creds, unreachable service, ambiguous spec), comment the
   blocker on the issue, relabel it `needs-info`, and pick the next `ready-for-agent` instead of
