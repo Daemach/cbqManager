@@ -19,6 +19,12 @@
       <template #top-right>
         <q-input v-model="filter" dense outlined debounce="300" placeholder="Filter" clearable />
       </template>
+      <template #body-cell-queue="props">
+        <q-td :props="props">
+          <a v-if="props.value" class="queue-drill" :data-test="`watch-${props.value}`" @click="watchQueue(props.value)">{{ props.value }}</a>
+          <span v-else class="text-grey-6">—</span>
+        </q-td>
+      </template>
       <template #body-cell-actions="props">
         <q-td :props="props" class="q-gutter-xs">
           <q-btn dense size="sm" icon="update" @click="retry(props.row.id, false)" />
@@ -33,9 +39,17 @@
 import { ref, onMounted } from 'vue'
 import { useQuasar } from 'quasar'
 import { api } from '@/services/api'
+import { useRealtimeStore } from '@/stores/realtime'
 
 const props = defineProps({ connectionId: { type: [String, Number], required: true } })
 const $q = useQuasar()
+const realtime = useRealtimeStore()
+
+// Clicking a queue cell drills the Live Monitor dock down to that queue for this context (PRD-0002 #18).
+function watchQueue(q) {
+  realtime.mergeFilter(props.connectionId, { queue: q })
+  $q.notify({ type: 'info', message: `Live Monitor filtered to queue "${q}"`, timeout: 1500 })
+}
 const rows = ref([])
 const loading = ref(false)
 const filter = ref('')
@@ -71,3 +85,14 @@ function retry(id, del) {
 }
 onMounted(onRequest)
 </script>
+
+<style scoped>
+.queue-drill {
+  color: var(--q-primary);
+  cursor: pointer;
+  text-decoration: underline dotted;
+}
+.queue-drill:hover {
+  text-decoration: underline;
+}
+</style>

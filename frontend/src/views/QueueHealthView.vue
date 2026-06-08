@@ -28,6 +28,9 @@
       </template>
       <template #body-cell-actions="props">
         <q-td :props="props" class="q-gutter-xs">
+          <q-btn dense size="sm" outline icon="sensors" :data-test="`watch-${props.row.queue}`" @click="watchQueue(props.row.queue)">
+            <q-tooltip>Watch this queue in the Live Monitor</q-tooltip>
+          </q-btn>
           <q-btn dense size="sm" color="primary" label="Heal" @click="run('heal', props.row.queue)" />
           <q-btn dense size="sm" label="Park" @click="run('park', props.row.queue)" />
           <q-btn dense size="sm" label="Release" @click="run('release', props.row.queue)" />
@@ -41,9 +44,18 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useQuasar } from 'quasar'
 import { api } from '@/services/api'
+import { useRealtimeStore } from '@/stores/realtime'
 
 const props = defineProps({ connectionId: { type: [String, Number], required: true } })
 const $q = useQuasar()
+const realtime = useRealtimeStore()
+
+// Drill-down: auto-apply a clearable queue= filter on the Live Monitor dock for THIS context, so the
+// operator immediately watches just this queue's live activity (PRD-0002 #18). Clear via the dock chip.
+function watchQueue(queue) {
+  realtime.mergeFilter(props.connectionId, { queue })
+  $q.notify({ type: 'info', message: `Live Monitor filtered to queue "${queue}"`, timeout: 1500 })
+}
 const rows = ref([])
 const loading = ref(false)
 

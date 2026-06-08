@@ -170,6 +170,10 @@ export const useRealtimeStore = defineStore('realtime', () => {
   // --- view helpers --------------------------------------------------------
 
   function setFilter(cid, spec) { ensureContext(cid).filter = { ...(spec || {}) } }
+  // Merge a partial filter into a context's existing filter (preserves the other fields). Used by
+  // tool drill-downs to auto-apply e.g. { queue } without clobbering a manual state/text filter, and
+  // by the dock's per-field inputs — the store's per-context `filter` is the single source of truth.
+  function mergeFilter(cid, partial) { const c = ensureContext(cid); c.filter = { ...c.filter, ...(partial || {}) } }
   function clearFeed(cid) { const c = ensureContext(cid); c.events = []; c.heldCount = 0 }
   function badgeFor(cid) { return contexts[String(cid)]?.badge ?? { total: 0, error: 0 } }
 
@@ -186,7 +190,7 @@ export const useRealtimeStore = defineStore('realtime', () => {
     ensureContext, pushEvent, injectActive,
     subscribe, unsubscribe, setActive, closeContext,
     pause, resume, toggleStreaming,
-    setFilter, clearFeed, badgeFor,
+    setFilter, mergeFilter, clearFeed, badgeFor,
     activeContext, activeFilter, activeEvents, activeFiltered,
     activeStreaming, activeStatus, activeHeldCount
   }

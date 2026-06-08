@@ -22,6 +22,17 @@
 
       <div class="text-caption text-grey-5 q-ml-sm" data-test="monitor-count">{{ filtered.length }} shown</div>
 
+      <!-- Auto-applied (or manual) Queue filter — visible + clearable in one click (PRD-0002 #19). -->
+      <q-chip
+        v-if="queueFilter"
+        dense removable square
+        color="primary" text-color="white"
+        class="q-ml-sm"
+        icon="filter_alt"
+        data-test="monitor-queue-filter"
+        @remove="clearQueueFilter"
+      >queue: {{ queueFilter }}</q-chip>
+
       <q-space />
 
       <q-btn
@@ -49,11 +60,11 @@
     <template v-if="!collapsed">
       <!-- multi-column filter row -->
       <div class="dock-filters row q-col-gutter-xs q-pa-xs bg-grey-10">
-        <div class="col"><q-input v-model="filter.queue" dense outlined dark clearable label="Queue" data-test="dock-filter-queue" /></div>
-        <div class="col"><q-input v-model="filter.state" dense outlined dark clearable label="State" data-test="dock-filter-state" /></div>
-        <div class="col"><q-input v-model="filter.mapping" dense outlined dark clearable label="Mapping" data-test="dock-filter-mapping" /></div>
-        <div class="col"><q-input v-model="filter.instance" dense outlined dark clearable label="Instance" data-test="dock-filter-instance" /></div>
-        <div class="col-3"><q-input v-model="filter.text" dense outlined dark clearable label="Search" debounce="150" data-test="dock-filter-text" /></div>
+        <div class="col"><q-input v-model="fQueue" dense outlined dark clearable label="Queue" data-test="dock-filter-queue" /></div>
+        <div class="col"><q-input v-model="fState" dense outlined dark clearable label="State" data-test="dock-filter-state" /></div>
+        <div class="col"><q-input v-model="fMapping" dense outlined dark clearable label="Mapping" data-test="dock-filter-mapping" /></div>
+        <div class="col"><q-input v-model="fInstance" dense outlined dark clearable label="Instance" data-test="dock-filter-instance" /></div>
+        <div class="col-3"><q-input v-model="fText" dense outlined dark clearable label="Search" debounce="150" data-test="dock-filter-text" /></div>
       </div>
 
       <!-- event feed -->
@@ -107,7 +118,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, watch, onBeforeUnmount } from 'vue'
+import { ref, computed, onBeforeUnmount } from 'vue'
 import { useRealtimeStore } from '@/stores/realtime'
 
 const store = useRealtimeStore()
@@ -120,22 +131,25 @@ const streaming = computed(() => store.activeStreaming)
 const heldCount = computed(() => store.activeHeldCount)
 const status = computed(() => store.activeStatus)
 
-// Per-context filter, mirrored locally for v-model and written back to the active context's store
-// slot so each Connection keeps its own filter across context switches.
-const filter = reactive({ queue: '', state: '', mapping: '', instance: '', text: '' })
+// The active context's per-context filter is the single source of truth (store.activeFilter). Each
+// input is a computed proxy that reads it and writes a single merged field back — so a tool
+// drill-down (store.mergeFilter(cid,{queue})) and a manual edit stay consistent, and switching tabs
+// shows each context's own filter automatically.
+function filterField(key) {
+  return computed({
+    get: () => store.activeFilter?.[key] || '',
+    set: (v) => { if (store.activeId != null) store.mergeFilter(store.activeId, { [key]: v || '' }) }
+  })
+}
+const fQueue = filterField('queue')
+const fState = filterField('state')
+const fMapping = filterField('mapping')
+const fInstance = filterField('instance')
+const fText = filterField('text')
 
-watch(() => store.activeId, () => {
-  const f = store.activeFilter || {}
-  filter.queue = f.queue || ''
-  filter.state = f.state || ''
-  filter.mapping = f.mapping || ''
-  filter.instance = f.instance || ''
-  filter.text = f.text || ''
-}, { immediate: true })
-
-watch(filter, (val) => {
-  if (store.activeId != null) store.setFilter(store.activeId, { ...val })
-}, { deep: true })
+// The auto-applied (or manual) Queue filter, surfaced as a removable chip and clearable in one click.
+const queueFilter = computed(() => store.activeFilter?.queue || '')
+function clearQueueFilter() { if (store.activeId != null) store.mergeFilter(store.activeId, { queue: '' }) }
 
 const statusLabel = computed(() => ({
   idle: 'idle', connecting: 'connecting…', live: 'live', disabled: 'no realtime', error: 'error'
