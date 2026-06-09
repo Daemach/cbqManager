@@ -33,8 +33,23 @@ class {
 		}
 
 		var data = q.orderBy( "failedDate", "desc" ).paginate( arguments.page, arguments.maxRows );
-		data.results = enricher.enrichAll( data.results );
+		// Enrich (parses fileName/lineNumber/sql out of the raw exception blobs) THEN slim each row.
+		// One cbq_failed_jobs row can carry ~80KB of `exception` + `exceptionStackTrace`; a page of 100
+		// serialized to JSON OOM'd the server (java heap space). The list only needs the parsed/display
+		// fields. The small `memento` (needed for retry + the payload dialog) is kept; the full raw
+		// exception is dropped here and available on-demand if a detail view is ever added.
+		data.results = enricher.enrichAll( data.results ).map( ( row ) => slimRow( row ) );
 		return data;
+	}
+
+	// Heavy raw exception columns dropped from the LIST payload (already parsed by the enricher).
+	variables.HEAVY_COLUMNS = [ "exception", "exceptionStackTrace", "exceptionDetail", "exceptionExtendedInfo" ];
+
+	private struct function slimRow( required struct row ){
+		for ( var k in variables.HEAVY_COLUMNS ){
+			structDelete( arguments.row, k );
+		}
+		return arguments.row;
 	}
 
 	/**

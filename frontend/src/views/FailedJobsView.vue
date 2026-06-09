@@ -90,9 +90,10 @@ const rows = ref([])
 const loading = ref(false)
 const filter = ref('')
 // Recent-first house style (PRD-0002): default sort failedDate DESC so the newest Failed Job is the
-// first visible row on load — agreeing with FailedJobRepository.list's ORDER BY failedDate DESC. A
-// larger window (100) feeds the virtual-scroll surface rather than hiding recent failures on page 2.
-const pagination = ref({ page: 1, rowsPerPage: 100, rowsNumber: 0, sortBy: 'failedDate', descending: true })
+// first visible row on load — agreeing with FailedJobRepository.list's ORDER BY failedDate DESC.
+// Failed-job rows are heavy (large mementos + the backend now strips the raw exception blobs), so a
+// 50-row window keeps the virtual-scroll surface useful without bulk-loading a huge page.
+const pagination = ref({ page: 1, rowsPerPage: 50, rowsNumber: 0, sortBy: 'failedDate', descending: true })
 
 const columns = [
   { name: 'failedDate', label: 'Failed', field: 'failedDate', align: 'left' },
