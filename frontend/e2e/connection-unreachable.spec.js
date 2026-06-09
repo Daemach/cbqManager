@@ -138,13 +138,16 @@ test.describe('Connection unreachable — calm, retryable tool views (pre-VPN)',
   })
 
   test('the Connection picker keeps working regardless of reachability', async ({ page }) => {
+    // The banner waits on a real connection_unreachable 503, whose JDBC handshake against an
+    // unreachable host is genuinely slow under load — give it room beyond the 10s expect default.
+    test.setTimeout(60_000)
     await loginAndOpenApp(page)
     const id = await createUnreachableConn(page, `e2e-unreach-picker-${Date.now()}`)
     try {
       // The toolbar picker reads the OWN store (not the target DB), so it must always render.
       await gotoTool(page, id, 'health')
       await expect(page.locator('[data-test=connection-picker]')).toBeVisible()
-      await expect(page.locator('[data-test=connection-unreachable]')).toBeVisible()
+      await expect(page.locator('[data-test=connection-unreachable]')).toBeVisible({ timeout: 30_000 })
     } finally {
       await deleteConn(page, id)
     }

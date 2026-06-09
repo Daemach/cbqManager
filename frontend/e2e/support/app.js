@@ -31,9 +31,18 @@ export async function login(page, creds = DEFAULT_ADMIN) {
  * Log in and wait for the app shell to render. Console layout v2 (issue #18) has no Connections
  * dashboard — the shell is the toolbar (with the Connections picker) + the persistent Live Monitor
  * dock. We wait on the picker button, which is always present once the layout mounts.
+ *
+ * Issue #24: most specs run with a shared authenticated storageState (the bearer token is already
+ * in localStorage under `cbqm_token`), so there is no login form to fill — we just navigate into
+ * the app shell. Only when no token is present (a clean/unauthenticated storageState, e.g. a
+ * non-default `creds`) do we drive the login form. Signature is unchanged so specs don't change.
  */
 export async function loginAndOpenApp(page, creds = DEFAULT_ADMIN) {
-  await login(page, creds)
+  await page.goto('/')
+  const authenticated = await page.evaluate(() => !!localStorage.getItem('cbqm_token'))
+  if (!authenticated) {
+    await login(page, creds)
+  }
   await expect(page.getByText('cbqManager')).toBeVisible()
   await expect(page.locator('[data-test=connection-picker]')).toBeVisible()
 }

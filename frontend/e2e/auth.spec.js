@@ -1,6 +1,11 @@
 import { test, expect } from '@playwright/test'
 import { login, loginAndOpenApp, collectErrors } from './support/app.js'
 
+// Issue #24: the rest of the suite runs with a shared authenticated storageState. These auth-flow
+// specs REQUIRE a clean/unauthenticated start (they assert the login screen, drive the login form,
+// and force a forbidden session), so they opt out of the shared state with an empty storageState.
+test.use({ storageState: { cookies: [], origins: [] } })
+
 test.describe('Authentication', () => {
   test('unauthenticated visit shows the login screen', async ({ page }) => {
     await page.goto('/')
