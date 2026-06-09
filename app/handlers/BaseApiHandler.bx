@@ -36,6 +36,56 @@ class extends="coldbox.system.RestHandler" {
 	}
 
 	/**
+	 * Guard a Connection-scoped read/action against an unreachable target DB (CONTEXT.md "Primary
+	 * operator workflow": the console opens BEFORE the VPN, so the production Connection's DB is
+	 * briefly unreachable). When the runtime can't open the datasource it throws a BoxRuntimeException
+	 * whose message starts with "Unable to create datasource connection ..." — a transient infra
+	 * condition, not a bug. We catch ONLY that case and map it to a calm, structured HTTP 503
+	 * (`connection_unreachable`) the frontend renders as a retryable banner. Any OTHER exception
+	 * re-throws so the normal RestHandler error path (raw 500) still surfaces real bugs.
+	 *
+	 * Deliberately NOT 401/403 — those trip the global auth redirect (App.vue). Centralized here so
+	 * all five Connection-scoped tools (QueueHealth/Jobs/FailedJobs/Batches/Archive) behave identically.
+	 *
+	 * Usage: `withConnection( event, () => event.getResponse().setData( repo.read( rc.connectionId ) ) )`
+	 */
+	private function withConnection( required any event, required any fn ){
+		try {
+			return arguments.fn();
+		} catch ( any e ) {
+			if ( isConnectionUnreachable( e ) ){
+				// Render the exact structured contract the frontend keys on. We renderData() directly
+				// (rather than the standard Response packet) so `code` sits at the TOP level of the body
+				// — `{ error:true, code:"connection_unreachable", messages:[...] }` — and short-circuit
+				// the RestHandler's default render. 503 (Service Unavailable) reads as transient/retry.
+				arguments.event.renderData(
+					type       = "json",
+					statusCode = 503,
+					data       = {
+						"error"    : true,
+						"code"     : "connection_unreachable",
+						"messages" : [ "Can't reach this Connection's database — connect the VPN and refresh." ]
+					}
+				);
+				return;
+			}
+			rethrow;
+		}
+	}
+
+	/**
+	 * True when an exception is the datasource-unreachable condition (target DB not reachable yet).
+	 * Pure predicate over the exception message so it is independent of the concrete exception type
+	 * the JDBC layer happens to throw. Walks `message` + `detail` since the runtime sometimes wraps
+	 * the connect failure ("An exception occurred: Unable to create datasource connection ...").
+	 */
+	private boolean function isConnectionUnreachable( required any e ){
+		var needle = "Unable to create datasource connection";
+		var hay    = ( arguments.e.message ?: "" ) & " " & ( arguments.e.detail ?: "" );
+		return hay.findNoCase( needle ) > 0;
+	}
+
+	/**
 	 * Record a mutation against the audit log using the current actor.
 	 */
 	private function audit( required string action, struct meta = {} ){

@@ -15,13 +15,13 @@ class extends="BaseApiHandler" {
 			"openOnly" : rc.openOnly ?: false,
 			"mapping"  : rc.mapping  ?: ""
 		};
-		event.getResponse().setDataWithPagination( jobRepo.list( rc.connectionId, filters, rc.page ?: 1, rc.maxRows ?: 25 ) );
+		withConnection( event, () => event.getResponse().setDataWithPagination( jobRepo.list( rc.connectionId, filters, rc.page ?: 1, rc.maxRows ?: 25 ) ) );
 	}
 
 	function nextUp( event, rc, prc ){
 		if ( !secure( event, "job.nextup", rc.connectionId ) ) return;
 		var priority = ( !isNull( rc.queuePriority ) && isJSON( rc.queuePriority ) ) ? jsonDeserialize( rc.queuePriority ) : [];
-		event.getResponse().setData( jobRepo.nextUp( rc.connectionId, priority ) );
+		withConnection( event, () => event.getResponse().setData( jobRepo.nextUp( rc.connectionId, priority ) ) );
 	}
 
 	// ---- control actions (return affected row count) ----
@@ -40,13 +40,17 @@ class extends="BaseApiHandler" {
 	 */
 	private function act( required any event, required struct rc, required string action, required any fn, struct meta = {} ){
 		if ( !secure( arguments.event, arguments.action, arguments.rc.connectionId ) ) return;
-		var affected = arguments.fn();
-		arguments.meta[ "connectionId" ] = arguments.rc.connectionId;
-		arguments.meta[ "result" ]       = "affected=#affected#";
-		audit( arguments.action, arguments.meta );
-		arguments.event.getResponse()
-			.setData( { "affected" : affected } )
-			.addMessage( affected ? "#affected# row(s) affected" : "No rows affected (state changed) — refresh" );
+		// Control actions mutate the TARGET DB too, so guard them the same way as reads: an unreachable
+		// Connection yields the calm 503 instead of a raw 500 (and we skip the audit, since nothing ran).
+		withConnection( arguments.event, () => {
+			var affected = arguments.fn();
+			arguments.meta[ "connectionId" ] = arguments.rc.connectionId;
+			arguments.meta[ "result" ]       = "affected=#affected#";
+			audit( arguments.action, arguments.meta );
+			arguments.event.getResponse()
+				.setData( { "affected" : affected } )
+				.addMessage( affected ? "#affected# row(s) affected" : "No rows affected (state changed) — refresh" );
+		} );
 	}
 
 }

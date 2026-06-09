@@ -8,7 +8,7 @@ class extends="BaseApiHandler" {
 	function index( event, rc, prc ){
 		if ( !secure( event, "failedjob.list", rc.connectionId ) ) return;
 		var filters = { "filter" : rc.filter ?: "" };
-		event.getResponse().setDataWithPagination( failedRepo.list( rc.connectionId, filters, rc.page ?: 1, rc.maxRows ?: 25 ) );
+		withConnection( event, () => event.getResponse().setDataWithPagination( failedRepo.list( rc.connectionId, filters, rc.page ?: 1, rc.maxRows ?: 25 ) ) );
 	}
 
 	function retry( event, rc, prc ){

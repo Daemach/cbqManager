@@ -7,8 +7,10 @@ class extends="BaseApiHandler" {
 
 	function index( event, rc, prc ){
 		if ( !secure( event, "archive.list", rc.connectionId ) ) return;
+		// Archive reads cbqManager's OWN store (not the target DB), so it stays available even pre-VPN;
+		// wrapped for uniformity with the other Connection-scoped tools (all five behave identically).
 		var filters = { "queue" : rc.queue ?: "", "jobState" : rc.jobState ?: "" };
-		event.getResponse().setDataWithPagination( archive.history( rc.connectionId, filters, rc.page ?: 1, rc.maxRows ?: 50 ) );
+		withConnection( event, () => event.getResponse().setDataWithPagination( archive.history( rc.connectionId, filters, rc.page ?: 1, rc.maxRows ?: 50 ) ) );
 	}
 
 }

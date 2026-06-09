@@ -7,7 +7,7 @@ class extends="BaseApiHandler" {
 
 	function index( event, rc, prc ){
 		if ( !secure( event, "batch.list", rc.connectionId ) ) return;
-		event.getResponse().setDataWithPagination( batchRepo.list( rc.connectionId, rc.page ?: 1, rc.maxRows ?: 25 ) );
+		withConnection( event, () => event.getResponse().setDataWithPagination( batchRepo.list( rc.connectionId, rc.page ?: 1, rc.maxRows ?: 25 ) ) );
 	}
 
 	function cancel( event, rc, prc ){

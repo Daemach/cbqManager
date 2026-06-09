@@ -1,12 +1,15 @@
 <template>
   <q-page class="q-pa-md">
     <div class="text-h6 q-mb-md">Failed Jobs</div>
+
+    <ConnectionUnreachableBanner v-if="unreachable" :loading="loading" @retry="onRequest" />
     <!--
       TODO: port the reference failedJobs.cfm table — enriched columns (mapping, fileName:line,
       exceptionMessage), retry / retry+delete / delete row actions, bulk select. Enrichment is
       app-side (ADR-0001/Q9); retry is Memento insert (ADR-0002).
     -->
     <q-table
+      v-if="!unreachable"
       v-model:pagination="pagination"
       :rows="rows"
       :columns="columns"
@@ -60,10 +63,13 @@ import { api } from '@/services/api'
 import { useRealtimeStore } from '@/stores/realtime'
 import PayloadDialog from '@/components/PayloadDialog.vue'
 import TimeCell from '@/components/TimeCell.vue'
+import ConnectionUnreachableBanner from '@/components/ConnectionUnreachableBanner.vue'
+import { isConnectionUnreachable } from '@/services/connectionUnreachable.js'
 
 const props = defineProps({ connectionId: { type: [String, Number], required: true } })
 const $q = useQuasar()
 const realtime = useRealtimeStore()
+const unreachable = ref(false)
 
 // Payload dialog (issue #23 part B): /failed-jobs ships the re-queueable payload under `memento`.
 const payloadOpen = ref(false)
@@ -105,9 +111,12 @@ async function onRequest(p) {
     const res = await api.listFailed(props.connectionId, { page: pg.page, maxRows: pg.rowsPerPage, filter: filter.value || '' })
     rows.value = res.data || []
     pagination.value = { ...pg, rowsNumber: res.pagination?.totalRecords || 0 }
+    unreachable.value = false
   } catch (e) {
     rows.value = [] // 401/403 handled globally (App.vue); avoid an uncaught rejection
-    if (e.status !== 401 && e.status !== 403) $q.notify({ type: 'negative', message: e.message || 'Failed to load failed jobs' })
+    // Pre-VPN: target DB unreachable (503) → calm retryable banner, not an error toast.
+    if (isConnectionUnreachable(e)) unreachable.value = true
+    else if (e.status !== 401 && e.status !== 403) $q.notify({ type: 'negative', message: e.message || 'Failed to load failed jobs' })
   } finally {
     loading.value = false
   }

@@ -1,0 +1,63 @@
+/**
+ * HarvestBackoff — a per-Connection circuit-breaker for the Harvester (CONTEXT.md "Harvester").
+ *
+ * The operator opens the console BEFORE the VPN is up, so a production Connection's target DB is
+ * briefly unreachable. The Harvester runs every cycle (~60s) and, without this, re-attempts every
+ * unreachable Connection each cycle — wasting connect attempts and flooding the log with the same
+ * "Unable to create datasource connection" error. This breaker records a per-Connection failure
+ * timestamp and SKIPS that Connection for a cooldown window (~5 min) before retrying, killing the
+ * repeat spam. A success clears the breaker immediately so recovery (VPN up) is picked up next cycle.
+ *
+ * The decision logic is a PURE function of (last-failure epoch, now epoch, window) so it is unit
+ * tested deterministically with a fixed clock — no DB, no real connect attempts.
+ */
+@singleton
+class {
+
+	// Map of connectionId -> epoch seconds of the most recent harvest FAILURE.
+	variables.failedAt = {};
+
+	// Cooldown window in seconds (5 minutes): how long a failed Connection is skipped before a retry.
+	variables.WINDOW_SECONDS = 300;
+
+	/**
+	 * Should this Connection be SKIPPED this cycle? True iff it failed within the cooldown window.
+	 * Pure over the recorded state + the supplied `now` (epoch seconds) — pass Clock.epoch().
+	 *
+	 * @connectionId The Connection under consideration.
+	 * @now          Current time as unix epoch seconds.
+	 */
+	boolean function shouldSkip( required numeric connectionId, required numeric now ){
+		if ( !variables.failedAt.keyExists( arguments.connectionId ) ){
+			return false;
+		}
+		var since = arguments.now - variables.failedAt[ arguments.connectionId ];
+		return since < variables.WINDOW_SECONDS;
+	}
+
+	/**
+	 * Record that harvesting this Connection FAILED at `now` (epoch seconds). Opens/refreshes the
+	 * breaker so subsequent cycles skip it for the window.
+	 */
+	function recordFailure( required numeric connectionId, required numeric now ){
+		variables.failedAt[ arguments.connectionId ] = arguments.now;
+		return this;
+	}
+
+	/**
+	 * Record that harvesting this Connection SUCCEEDED — closes the breaker immediately so the next
+	 * cycle harvests normally (e.g. once the VPN comes up).
+	 */
+	function recordSuccess( required numeric connectionId ){
+		variables.failedAt.delete( arguments.connectionId );
+		return this;
+	}
+
+	/**
+	 * The cooldown window in seconds (for callers/tests that need the boundary).
+	 */
+	numeric function windowSeconds(){
+		return variables.WINDOW_SECONDS;
+	}
+
+}

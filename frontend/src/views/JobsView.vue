@@ -5,12 +5,16 @@
       <q-space />
       <q-input v-model="queue" dense outlined label="Queue" clearable style="width: 180px" @update:model-value="reload" />
     </div>
+
+    <ConnectionUnreachableBanner v-if="unreachable" :loading="loading" @retry="reload" />
+
     <!--
       TODO: server-side paginated q-table over /jobs (state-aware row actions per Q10):
       complete / reset / quarantine / delete, with reservation-age warnings on reserved rows,
       plus a "Next Up" highlight. State column comes from JobStateClassifier.
     -->
     <q-table
+      v-if="!unreachable"
       v-model:pagination="pagination"
       :rows="rows"
       :columns="columns"
@@ -83,10 +87,13 @@ import { elapsed as fmtElapsedValue } from '@/services/timeFormat.js'
 import { payloadField, tooltipPayload } from '@/services/payloadView.js'
 import PayloadDialog from '@/components/PayloadDialog.vue'
 import TimeCell from '@/components/TimeCell.vue'
+import ConnectionUnreachableBanner from '@/components/ConnectionUnreachableBanner.vue'
+import { isConnectionUnreachable } from '@/services/connectionUnreachable.js'
 
 const props = defineProps({ connectionId: { type: [String, Number], required: true } })
 const $q = useQuasar()
 const realtime = useRealtimeStore()
+const unreachable = ref(false)
 
 // Payload dialog (issue #23 part B): /jobs ships the payload as a JSON string under `payload`.
 const payloadOpen = ref(false)
@@ -140,9 +147,12 @@ async function onRequest(p) {
     const res = await api.listJobs(props.connectionId, { page: pg.page, maxRows: pg.rowsPerPage, queue: queue.value || '' })
     rows.value = res.data || []
     pagination.value = { ...pg, rowsNumber: res.pagination?.totalRecords || 0 }
+    unreachable.value = false
   } catch (e) {
     rows.value = [] // 401/403 handled globally (App.vue); avoid an uncaught rejection
-    if (e.status !== 401 && e.status !== 403) $q.notify({ type: 'negative', message: e.message || 'Failed to load jobs' })
+    // Pre-VPN: target DB unreachable (503) → calm retryable banner, not an error toast.
+    if (isConnectionUnreachable(e)) unreachable.value = true
+    else if (e.status !== 401 && e.status !== 403) $q.notify({ type: 'negative', message: e.message || 'Failed to load jobs' })
   } finally {
     loading.value = false
   }

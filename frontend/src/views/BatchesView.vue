@@ -1,11 +1,14 @@
 <template>
   <q-page class="q-pa-md">
     <div class="text-h6 q-mb-md">Batches</div>
+
+    <ConnectionUnreachableBanner v-if="unreachable" :loading="loading" @retry="load" />
     <!--
       TODO: progress bars (pending/failed/total), cancel / retry-failed / delete actions, and
       drill-down to live jobs via $.batchId (PRD batches).
     -->
     <q-table
+      v-if="!unreachable"
       v-model:pagination="pagination"
       :rows="rows"
       :columns="columns"
@@ -60,11 +63,14 @@ import { api } from '@/services/api'
 import { toDate, formatDurationSeconds } from '@/services/timeFormat.js'
 import PayloadDialog from '@/components/PayloadDialog.vue'
 import TimeCell from '@/components/TimeCell.vue'
+import ConnectionUnreachableBanner from '@/components/ConnectionUnreachableBanner.vue'
+import { isConnectionUnreachable } from '@/services/connectionUnreachable.js'
 
 const props = defineProps({ connectionId: { type: [String, Number], required: true } })
 const $q = useQuasar()
 const rows = ref([])
 const loading = ref(false)
+const unreachable = ref(false)
 
 // Payload dialog (issue #23 part B): /batches ships its config blob under `options`.
 const payloadOpen = ref(false)
@@ -104,6 +110,12 @@ async function load() {
   try {
     const res = await api.listBatches(props.connectionId, { page: 1, maxRows: 50 })
     rows.value = res.data || []
+    unreachable.value = false
+  } catch (e) {
+    rows.value = [] // 401/403 handled globally (App.vue); avoid an uncaught rejection
+    // Pre-VPN: target DB unreachable (503) → calm retryable banner, not an error toast.
+    if (isConnectionUnreachable(e)) unreachable.value = true
+    else if (e.status !== 401 && e.status !== 403) $q.notify({ type: 'negative', message: e.message || 'Failed to load batches' })
   } finally {
     loading.value = false
   }

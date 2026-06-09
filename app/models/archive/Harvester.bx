@@ -13,6 +13,7 @@ class {
 	property name="archive"   inject="ArchiveRepository";
 	property name="jobRepo"   inject="JobRepository";
 	property name="clock"     inject="Clock";
+	property name="backoff"   inject="HarvestBackoff";
 
 	// Max terminal rows to pull per Connection per harvest cycle
 	variables.BATCH_SIZE = 1000;
@@ -47,12 +48,22 @@ class {
 	 * Harvest every active, harvest-enabled Connection.
 	 */
 	array function harvestAll(){
+		var nowEpoch = clock.epoch();
 		return registry.list()
 			.filter( ( c ) => ( c.isActive ?: true ) )
 			.map( ( c ) => {
+				// Per-Connection backoff (CONTEXT.md "Harvester"): skip a Connection that failed within
+				// the cooldown window so an unreachable target (pre-VPN) doesn't re-spam the log + waste
+				// a connect attempt every cycle. A success clears the breaker so recovery is immediate.
+				if ( backoff.shouldSkip( c.id, nowEpoch ) ){
+					return { "connectionId" : c.id, "skipped" : true };
+				}
 				try {
-					return { "connectionId" : c.id, "result" : harvest( c.id ) };
+					var result = harvest( c.id );
+					backoff.recordSuccess( c.id );
+					return { "connectionId" : c.id, "result" : result };
 				} catch ( any e ) {
+					backoff.recordFailure( c.id, nowEpoch );
 					return { "connectionId" : c.id, "error" : e.message };
 				}
 			} );

@@ -8,7 +8,7 @@ class extends="BaseApiHandler" {
 
 	function index( event, rc, prc ){
 		if ( !secure( event, "queue.health", rc.connectionId ) ) return;
-		event.getResponse().setData( jobRepo.queueHealth( rc.connectionId ) );
+		withConnection( event, () => event.getResponse().setData( jobRepo.queueHealth( rc.connectionId ) ) );
 	}
 
 }

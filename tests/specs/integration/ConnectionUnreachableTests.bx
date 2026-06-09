@@ -1,0 +1,114 @@
+/**
+ * Issue #21 — the Connection-scoped tool endpoints degrade gracefully when a Connection's target DB
+ * is unreachable (CONTEXT.md "Primary operator workflow": the operator opens the console BEFORE the
+ * VPN, so the production DB is briefly unreachable).
+ *
+ * Asserts EXTERNAL behavior of the secured tool endpoints against a Connection whose datasource can
+ * never connect (an e2e-style jdbc:sqlserver://localhost;databaseName=test): each returns a structured
+ * HTTP 503 with code "connection_unreachable" (NOT a raw 500, and NOT a 401/403 that would trip the
+ * global auth redirect). The Connection list (own store) keeps working regardless.
+ */
+@autowire
+class extends="coldbox.system.testing.BaseTestCase" {
+
+	@inject( "ConnectionRegistry" )
+	property name="registry";
+
+	@inject( "provider:JwtService@cbsecurity" )
+	property name="jwtService";
+
+	@inject( "provider:authenticationService@cbauth" )
+	property name="cbauth";
+
+	@inject( "QueryBuilderFactory" )
+	property name="qbFactory";
+
+	function beforeAll(){ super.beforeAll(); }
+
+	// Tear down the "TEST_*" Connections this spec creates (see ConnectionRegistryTests).
+	function afterAll(){
+		variables.qbFactory.forOwnStore().from( "cbqm_connections" ).where( "name", "like", "TEST_%" ).delete();
+		super.afterAll();
+	}
+
+	function run(){
+		describe( "Connection-scoped tools vs. an unreachable target DB (issue 21)", () => {
+
+			beforeEach( () => {
+				setup();
+				cbauth.logout();
+				jwtService.getTokenStorage().clearAll();
+			} );
+
+			it( "the live tool endpoints return 503 connection_unreachable (not 500) for an unreachable DB", () => {
+				var connId = unreachableConnection();
+				try {
+					var token = jwtService.attempt( "admin", "password" );
+
+					// The four tools that read the TARGET DB. (Archive reads the OWN store, covered below.)
+					var routes = [
+						"/api/connections/#connId#/health",
+						"/api/connections/#connId#/jobs",
+						"/api/connections/#connId#/failed-jobs",
+						"/api/connections/#connId#/batches"
+					];
+
+					routes.each( ( route ) => {
+						var event = this.get( route = route, params = { "x-auth-token" : token } );
+						var rd    = event.getRenderData();
+
+						expect( rd ).toHaveKey( "statusCode", "#route# should render a structured response" );
+						expect( rd.statusCode ).toBe( 503, "#route# must map an unreachable DB to 503, not 500" );
+						expect( rd.data.code ).toBe( "connection_unreachable", "#route# must carry the structured code" );
+						expect( rd.data.error ).toBeTrue();
+						expect( rd.data.messages[ 1 ] ).toInclude( "connect the VPN" );
+					} );
+				} finally {
+					registry.remove( connId );
+				}
+			} );
+
+			it( "must NOT return 401/403 for an unreachable DB (would trip the global auth redirect)", () => {
+				var connId = unreachableConnection();
+				try {
+					var token = jwtService.attempt( "admin", "password" );
+					var event = this.get( route = "/api/connections/#connId#/health", params = { "x-auth-token" : token } );
+					var rd    = event.getRenderData();
+					expect( rd.statusCode ).notToBe( 401 );
+					expect( rd.statusCode ).notToBe( 403 );
+				} finally {
+					registry.remove( connId );
+				}
+			} );
+
+			it( "the Connection list (own store) still returns 200 even when a Connection is unreachable", () => {
+				var connId = unreachableConnection();
+				try {
+					var token    = jwtService.attempt( "admin", "password" );
+					var event    = this.get( route = "/api/connections", params = { "x-auth-token" : token } );
+					var response = event.getPrivateValue( "Response" );
+					expect( response.getStatusCode() ).toBe( 200 );
+					expect( response.getError() ).toBeFalse();
+				} finally {
+					registry.remove( connId );
+				}
+			} );
+
+		} );
+	}
+
+	/**
+	 * Create a TEST_ Connection whose datasource can never connect (mirrors the e2e throwaway conns).
+	 */
+	private numeric function unreachableConnection(){
+		return registry.create( {
+			"name"             : "TEST_UNREACH_" & getTickCount(),
+			"environment"      : "development",
+			"grammar"          : "mssql",
+			"datasourceClass"  : "com.microsoft.sqlserver.jdbc.SQLServerDriver",
+			"connectionString" : "jdbc:sqlserver://localhost;databaseName=test",
+			"secrets"          : { "username" : "sa", "password" : "x" }
+		} );
+	}
+
+}

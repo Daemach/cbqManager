@@ -6,16 +6,20 @@
       <q-btn dense icon="refresh" :loading="loading" @click="load" />
     </div>
 
-    <q-banner v-if="hasOrphans" class="bg-negative text-white q-mb-md" rounded>
+    <ConnectionUnreachableBanner v-if="unreachable" :loading="loading" @retry="load" />
+
+    <q-banner v-if="hasOrphans && !unreachable" class="bg-negative text-white q-mb-md" rounded>
       <template #avatar><q-icon name="warning" /></template>
       Orphan blockers detected — a pool may be starved. Use <b>Heal</b> on the affected queue.
     </q-banner>
 
     <q-table
+      v-if="!unreachable"
       :rows="rows"
       :columns="columns"
       row-key="queue"
       :loading="loading"
+      data-test="health-table"
       dense flat bordered
       :pagination="{ rowsPerPage: 0 }"
       hide-bottom
@@ -45,6 +49,8 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useQuasar } from 'quasar'
 import { api } from '@/services/api'
 import { useRealtimeStore } from '@/stores/realtime'
+import ConnectionUnreachableBanner from '@/components/ConnectionUnreachableBanner.vue'
+import { isConnectionUnreachable } from '@/services/connectionUnreachable.js'
 
 const props = defineProps({ connectionId: { type: [String, Number], required: true } })
 const $q = useQuasar()
@@ -58,6 +64,7 @@ function watchQueue(queue) {
 }
 const rows = ref([])
 const loading = ref(false)
+const unreachable = ref(false)
 
 const columns = [
   { name: 'queue', label: 'Queue', field: 'queue', align: 'left' },
@@ -77,8 +84,16 @@ async function load() {
   try {
     const res = await api.queueHealth(props.connectionId)
     rows.value = res.data || []
+    unreachable.value = false
   } catch (e) {
-    $q.notify({ type: 'negative', message: e.message })
+    // Pre-VPN: the target DB is unreachable (backend 503). Show the calm retryable banner, not an
+    // error toast. 401/403 are handled globally (App.vue); avoid a duplicate notify there too.
+    if (isConnectionUnreachable(e)) {
+      unreachable.value = true
+      rows.value = []
+    } else if (e.status !== 401 && e.status !== 403) {
+      $q.notify({ type: 'negative', message: e.message })
+    }
   } finally {
     loading.value = false
   }

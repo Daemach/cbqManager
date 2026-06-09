@@ -1,0 +1,59 @@
+/**
+ * HarvestBackoff — the per-Connection circuit-breaker that stops the Harvester re-attempting (and
+ * re-logging) an unreachable Connection every cycle (issue #21, CONTEXT.md "Harvester").
+ *
+ * Pure logic over (lastFailure, now, window) — asserted deterministically with explicit epoch
+ * seconds, no DB and no real connect attempts.
+ */
+@autowire
+class extends="coldbox.system.testing.BaseTestCase" {
+
+	@inject( "HarvestBackoff" )
+	property name="backoff";
+
+	function beforeAll(){ super.beforeAll(); }
+
+	function run(){
+		describe( "HarvestBackoff (per-Connection harvest circuit-breaker)", () => {
+
+			beforeEach( () => {
+				setup();
+				// Reset breaker state between specs (singleton): clear any Connections we touch.
+				[ 1, 2, 3, 4242 ].each( ( id ) => backoff.recordSuccess( id ) );
+			} );
+
+			it( "does not skip a Connection that has never failed", () => {
+				expect( backoff.shouldSkip( 1, 1000 ) ).toBeFalse();
+			} );
+
+			it( "skips a Connection within the cooldown window after a failure", () => {
+				backoff.recordFailure( 2, 1000 );
+				// 60s later — still inside the 300s window → skip (no wasted retry, no log spam).
+				expect( backoff.shouldSkip( 2, 1060 ) ).toBeTrue();
+			} );
+
+			it( "retries a Connection once the cooldown window has elapsed", () => {
+				backoff.recordFailure( 3, 1000 );
+				// At exactly the window boundary it is eligible again (since == window, not < window).
+				expect( backoff.shouldSkip( 3, 1000 + backoff.windowSeconds() ) ).toBeFalse();
+				// And well past the window too.
+				expect( backoff.shouldSkip( 3, 1000 + backoff.windowSeconds() + 60 ) ).toBeFalse();
+			} );
+
+			it( "a success clears the breaker immediately (recovery is picked up next cycle)", () => {
+				backoff.recordFailure( 4242, 1000 );
+				expect( backoff.shouldSkip( 4242, 1060 ) ).toBeTrue();
+				backoff.recordSuccess( 4242 );
+				expect( backoff.shouldSkip( 4242, 1060 ) ).toBeFalse();
+			} );
+
+			it( "tracks Connections independently (one failing does not skip another)", () => {
+				backoff.recordFailure( 1, 1000 );
+				expect( backoff.shouldSkip( 1, 1100 ) ).toBeTrue();
+				expect( backoff.shouldSkip( 2, 1100 ) ).toBeFalse();
+			} );
+
+		} );
+	}
+
+}
