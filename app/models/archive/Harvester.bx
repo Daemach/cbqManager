@@ -37,11 +37,26 @@ class {
 		var mapped = terminal.map( ( row ) => toArchiveRow( row ) );
 		var archived = archive.archiveJobs( arguments.connectionId, mapped );
 
-		// Queue Depth sample reuses the same analyzer-backed buckets as Queue Health
-		var buckets = jobRepo.queueHealth( arguments.connectionId );
-		archive.sampleQueueDepth( arguments.connectionId, buckets );
+		// Queue Depth sampling is INDEPENDENT of job archiving and runs after it, so isolate it: a
+		// transient queueHealth/insert failure must not abort the harvest (which would silently STOP
+		// queue-depth sampling while jobs keep archiving — #15). It reuses the same analyzer-backed
+		// buckets as Queue Health; an empty live queue yields no buckets (nothing to sample), which is
+		// correct, not a failure. Any real error is surfaced in the result, not swallowed.
+		var sampled = 0;
+		var sampleError = "";
+		try {
+			var buckets = jobRepo.queueHealth( arguments.connectionId );
+			archive.sampleQueueDepth( arguments.connectionId, buckets );
+			sampled = arrayLen( buckets );
+		} catch ( any e ) {
+			sampleError = e.message;
+		}
 
-		return { "archived" : archived, "queuesSampled" : arrayLen( buckets ) };
+		var result = { "archived" : archived, "queuesSampled" : sampled };
+		if ( len( sampleError ) ){
+			result[ "sampleError" ] = sampleError;
+		}
+		return result;
 	}
 
 	/**
