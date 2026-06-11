@@ -11,6 +11,12 @@ class extends="BaseApiHandler" {
 		withConnection( event, () => event.getResponse().setDataWithPagination( failedRepo.list( rc.connectionId, filters, rc.page ?: 1, rc.maxRows ?: 25 ) ) );
 	}
 
+	// On-demand FULL exception/stack-trace for one Failed Job (the list strips those heavy blobs, #26).
+	function show( event, rc, prc ){
+		if ( !secure( event, "failedjob.get", rc.connectionId ) ) return;
+		withConnection( event, () => event.getResponse().setData( failedRepo.detail( rc.connectionId, rc.id ) ) );
+	}
+
 	function retry( event, rc, prc ){
 		if ( !secure( event, "failedjob.retry", rc.connectionId ) ) return;
 		var n = failedRepo.retry( rc.connectionId, rc.id, rc.deleteAfter ?: false );

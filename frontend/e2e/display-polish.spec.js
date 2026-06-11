@@ -155,6 +155,29 @@ test.describe('Display polish — payload, timestamps, monitor columns (#23)', (
     }
   })
 
+  test('Failed Jobs: the exception button fetches the full stack trace on-demand (#26)', async ({ page }) => {
+    await loginAndOpenApp(page)
+    await stub(page, '**/api/connections/**/failed-jobs**', [
+      { id: 88, queue: 'q', mapping: 'BoomJob', fileName: 'a.cfc', lineNumber: 9, exceptionMessage: 'boom', failedDate: '2026-06-07 10:00:00', hrFailedDate: isoMinutesAgo(3), memento: '{}' }
+    ])
+    // The detail endpoint returns the FULL exception (stripped from the list to avoid the OOM, #26).
+    // Registered AFTER the list stub so it takes precedence for the /:id path.
+    await page.route('**/api/connections/**/failed-jobs/88', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { id: 88, exceptionStackTrace: 'java.lang.RuntimeException: boom\n  at Foo.bar(Foo.java:42)\n  at Baz.qux(Baz.java:7)' } }) })
+    )
+    const id = await createConn(page, `e2e-26-exc-${Date.now()}`)
+    try {
+      await page.goto(`/#/c/${id}/failed`)
+      await expect(page.locator('[data-test=failed-table]')).toBeVisible()
+      await page.locator('[data-test=exception-88]').click()
+      const dialog = page.locator('[data-test=payload-dialog]')
+      await expect(dialog).toBeVisible()
+      await expect(dialog.locator('[data-test=payload-pre]')).toContainText('at Foo.bar(Foo.java:42)')
+    } finally {
+      await deleteConn(page, id)
+    }
+  })
+
   test('Batches: options dialog opens; Created renders relative; derived elapsed shows', async ({ page }) => {
     await loginAndOpenApp(page)
     const created = Math.floor(Date.now() / 1000) - 600

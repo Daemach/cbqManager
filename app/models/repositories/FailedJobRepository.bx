@@ -53,6 +53,18 @@ class {
 	}
 
 	/**
+	 * Full enriched single Failed Job — the on-demand detail the list deliberately omits (the heavy raw
+	 * exception + stack trace stripped from list() to avoid the OOM). One row, so no bulk-load risk.
+	 *
+	 * @return the enriched row, or {} when the Failed Job no longer exists.
+	 */
+	struct function detail( required numeric connectionId, required numeric id ){
+		var conn = registry.resolve( arguments.connectionId );
+		var row  = builder( conn ).from( variables.TABLE ).where( "id", arguments.id ).first();
+		return ( isNull( row ) || structIsEmpty( row ) ) ? {} : enricher.enrich( row );
+	}
+
+	/**
 	 * Retry a Failed Job by re-queueing its Memento (ADR-0002).
 	 *
 	 * @deleteAfter Also remove the cbq_failed_jobs row when true (retry-and-delete).

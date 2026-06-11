@@ -54,6 +54,7 @@ class {
 		// Failed Jobs
 		post(   "/api/connections/:connectionId/failed-jobs/:id/retry",  "FailedJobs.retry" )
 		delete( "/api/connections/:connectionId/failed-jobs/:id",        "FailedJobs.remove" )
+		get(    "/api/connections/:connectionId/failed-jobs/:id",        "FailedJobs.show" )
 		get(    "/api/connections/:connectionId/failed-jobs",            "FailedJobs.index" )
 
 		// Batches

@@ -46,6 +46,9 @@
       </template>
       <template #body-cell-actions="props">
         <q-td :props="props" class="q-gutter-xs">
+          <q-btn dense flat round size="sm" icon="error_outline" :data-test="`exception-${props.row.id}`" :loading="exceptionLoadingId === props.row.id" @click="showException(props.row)">
+            <q-tooltip>View full exception + stack trace</q-tooltip>
+          </q-btn>
           <q-btn dense size="sm" icon="update" @click="retry(props.row.id, false)" />
           <q-btn dense size="sm" icon="delete_outline" @click="retry(props.row.id, true)" />
         </q-td>
@@ -79,6 +82,26 @@ function showPayload(row) {
   payloadRaw.value = row.memento || row.payload || ''
   payloadTitle.value = `Failed job ${row.id} payload`
   payloadOpen.value = true
+}
+
+// On-demand full exception + stack trace (#26 follow-up): the list omits the heavy raw exception
+// blobs (they OOM'd the server), so fetch the single full row and show the stack trace in the
+// copyable dialog when an operator drills into a failure.
+const exceptionLoadingId = ref(null)
+async function showException(row) {
+  exceptionLoadingId.value = row.id
+  try {
+    const d = (await api.getFailed(props.connectionId, row.id)).data || {}
+    payloadRaw.value = d.exceptionStackTrace || d.exception || d.exceptionDetail || d.exceptionMessage || '(no exception detail recorded)'
+    payloadTitle.value = `Failed job ${row.id} — exception`
+    payloadOpen.value = true
+  } catch (e) {
+    if (!isConnectionUnreachable(e) && e.status !== 401 && e.status !== 403) {
+      $q.notify({ type: 'negative', message: e.message || 'Failed to load exception' })
+    }
+  } finally {
+    exceptionLoadingId.value = null
+  }
 }
 
 // Clicking a queue cell drills the Live Monitor dock down to that queue for this context (PRD-0002 #18).

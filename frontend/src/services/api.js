@@ -79,6 +79,8 @@ export const api = {
 
   // failed jobs
   listFailed: (cid, params) => request('GET', `/connections/${cid}/failed-jobs`, { params }),
+  // Full single failed job incl. the exception + stack trace the list omits (#26).
+  getFailed: (cid, id) => request('GET', `/connections/${cid}/failed-jobs/${id}`),
   retryFailed: (cid, id, deleteAfter) => request('POST', `/connections/${cid}/failed-jobs/${id}/retry`, { body: { deleteAfter } }),
   deleteFailed: (cid, id) => request('DELETE', `/connections/${cid}/failed-jobs/${id}`),
 
