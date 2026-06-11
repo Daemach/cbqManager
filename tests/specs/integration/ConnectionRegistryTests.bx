@@ -89,11 +89,45 @@ class extends="coldbox.system.testing.BaseTestCase" {
 					expect( resolved.datasource.class ).toBe( "com.microsoft.sqlserver.jdbc.SQLServerDriver" );
 					expect( resolved.datasource.username ).toBe( "sa" );
 					expect( resolved.datasource.password ).toBe( "p@ssw0rd" );
+					// Fast-fail (#25): a SQL Server URL gets short connect timeouts appended so an
+					// unreachable target fails in ~2s instead of hanging the thread pool (#22/#24 OOM).
+					expect( resolved.datasource.connectionString ).toInclude( "loginTimeout=2" );
+					expect( resolved.datasource.connectionString ).toInclude( "socketTimeout=3000" );
+					expect( resolved.datasource.connectionString ).toStartWith( "jdbc:sqlserver://localhost:1433" );
 					// Paired: the Connection carries its broadcast link.
 					expect( resolved.broadcastConnectionId ).toBe( bcId );
 				} finally {
 					registry.remove( id );
 					registry.removeBroadcast( bcId );
+				}
+			} );
+
+			it( "fast-fail timeouts: don't override an operator-set value, and skip non-SQL-Server URLs", () => {
+				// Operator already set loginTimeout → left as-is (and socketTimeout still appended).
+				var id1 = registry.create( {
+					"name"             : "TEST_CONN_FF1_" & getTickCount(),
+					"datasourceClass"  : "com.microsoft.sqlserver.jdbc.SQLServerDriver",
+					"connectionString" : "jdbc:sqlserver://h:1433;loginTimeout=30",
+					"secrets"          : {}
+				} );
+				// A non-SQL-Server URL is returned UNCHANGED (grammar-agnostic — ADR-0005).
+				var id2 = registry.create( {
+					"name"             : "TEST_CONN_FF2_" & getTickCount(),
+					"datasourceClass"  : "org.postgresql.Driver",
+					"connectionString" : "jdbc:postgresql://h:5432/db",
+					"secrets"          : {}
+				} );
+				try {
+					var cs1 = registry.resolve( id1 ).datasource.connectionString;
+					expect( cs1 ).toInclude( "loginTimeout=30" );      // operator value preserved
+					expect( cs1 ).notToInclude( "loginTimeout=2" );    // not overridden
+					expect( cs1 ).toInclude( "socketTimeout=3000" );   // backstop still added
+
+					var cs2 = registry.resolve( id2 ).datasource.connectionString;
+					expect( cs2 ).toBe( "jdbc:postgresql://h:5432/db" ); // untouched
+				} finally {
+					registry.remove( id1 );
+					registry.remove( id2 );
 				}
 			} );
 

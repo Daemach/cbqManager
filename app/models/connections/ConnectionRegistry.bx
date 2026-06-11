@@ -81,13 +81,30 @@ class {
 		var secrets = len( row.secrets_enc ?: "" )
 			? cipher.decryptStruct( row.secrets_enc, row.cipherIv, row.cipherAlg )
 			: {};
+
+		// Fast-fail (#25): for a SQL Server URL, append short timeouts so an unreachable / SSL-failing
+		// managed Connection fails in ~2s, not the 15-30s JDBC default — a pre-VPN burst of slow
+		// handshakes would otherwise saturate the thread pool and OOM the server (#22/#24). loginTimeout
+		// (seconds) bounds the whole connection establishment incl. the TLS handshake where the slow PKIX
+		// failure lives; socketTimeout (ms) is a mid-handshake backstop. Non-destructive (won't override
+		// an operator-set value) and SQL Server-only (other drivers' URLs pass through unchanged).
+		var connStr = row.connectionString ?: "";
+		if ( isSimpleValue( connStr ) && len( connStr ) && left( lCase( connStr ), 15 ) == "jdbc:sqlserver:" ){
+			if ( !findNoCase( "loginTimeout=", connStr ) ){
+				connStr &= ";loginTimeout=2";
+			}
+			if ( !findNoCase( "socketTimeout=", connStr ) ){
+				connStr &= ";socketTimeout=3000";
+			}
+		}
+
 		row[ "datasource" ] = {
 			// `generic` tells BoxLang to use the supplied JDBC driver class + connection string
 			// directly (verified against the live SQL Server target). The driver jar (e.g. bx-mssql)
 			// must be loaded by the runtime for `class` to resolve.
 			"driver"           : "generic",
 			"class"            : row.datasourceClass,
-			"connectionString" : row.connectionString,
+			"connectionString" : connStr,
 			"username"         : secrets.username ?: "",
 			"password"         : secrets.password ?: ""
 		};
