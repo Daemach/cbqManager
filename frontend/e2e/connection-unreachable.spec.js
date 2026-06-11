@@ -123,7 +123,13 @@ test.describe('Connection unreachable — calm, retryable tool views (pre-VPN)',
       await refired
       await expect(banner).toBeVisible()
 
-      // The banner is consistent across the other tool views too (shared component).
+      // The banner is consistent across the other tool views too (shared component). The REAL 503
+      // round-trip is already proven on `health` above, so stub the remaining tools' loads to an
+      // INSTANT connection_unreachable 503 — this avoids 3 more multi-second handshakes and keeps the
+      // suite fast/stable at higher worker counts (#27).
+      await page.route(new RegExp(`/api/connections/${id}/(jobs|failed-jobs|batches)`), (route) =>
+        route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: true, code: 'connection_unreachable', messages: [ 'unreachable' ] }) })
+      )
       for (const tool of ['jobs', 'failed', 'batches']) {
         await gotoTool(page, id, tool)
         await expect(page.locator('[data-test=connection-unreachable]')).toBeVisible()

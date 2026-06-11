@@ -25,13 +25,12 @@ export default defineConfig({
   // own-store datasource (Application.bx, issue #12), concurrent Connection writes wait instead of
   // throwing SQLITE_BUSY on a local-disk store, so the suite runs parallel again.
   fullyParallel: true,
-  // Worker count. Two contention sources once forced a cap of 2: per-spec /api/login (fixed by the
-  // shared storageState below, issue #24) and the backend hanging a thread 15-30s per unreachable-
-  // Connection JDBC handshake, which OOM'd the server at >=4 workers. Issue #25 fast-failed that
-  // connect (~1.5s), and the server now stays up even at 6 workers (the OOM is gone). The remaining
-  // limiter is ONE heavy spec — the connection-unreachable walk (5 real 503 round-trips) — which goes
-  // flaky above ~2 under capture load; so we keep 2 for a reliable green-gate. Follow-up: lighten that
-  // spec (or raise its per-step timeouts) to lift the cap. Overridable via `--workers=N`.
+  // Worker count. The old cap of 2 was forced by per-spec /api/login contention (fixed by the shared
+  // storageState below, #24) and the backend hanging a thread 15-30s per unreachable-Connection JDBC
+  // handshake (fixed by the fast-fail in #25). The last limiter was one heavy spec doing 4 real
+  // connection_unreachable round-trips; #27 lightened it (one real 503, rest stubbed). The OOM is gone
+  // (server stays up at 6 workers), but the remaining real-503 unreachable specs are contention-
+  // sensitive, so 2 stays the reliably-green value. Overridable via `--workers=N`.
   workers: 2,
   // Log in ONCE before the suite and share an authenticated storageState across every worker, so no
   // spec hits /api/login per-test. The auth-flow specs that need an unauthenticated/!=admin state opt
