@@ -25,18 +25,13 @@ export default defineConfig({
   // own-store datasource (Application.bx, issue #12), concurrent Connection writes wait instead of
   // throwing SQLITE_BUSY on a local-disk store, so the suite runs parallel again.
   fullyParallel: true,
-  // Worker cap (issue #24). PRIMARY fix: log in ONCE in globalSetup and share an authenticated
-  // storageState across every worker (below) so NO spec hits /api/login per-test — that removed the
-  // parallel-login contention on the JWT/CacheBox auth path. But a second, deeper bottleneck remains
-  // that storageState alone cannot solve: the data specs create Connections pointing at a real MSSQL
-  // host, and the backend's JDBC SSL handshake to that host fails SLOWLY (PKIX cert path, multi-second
-  // hang per attempt). Run ~4+ of those concurrently and the BoxLang request-thread pool saturates;
-  // the server then returns 503/500 to everything (logins included) and stays wedged for minutes.
-  // That is a backend-capacity issue, out of scope for this test-infra slice. Per the issue DoD we
-  // therefore CAP workers at the value confirmed green (2 — same as the #21 run) while keeping
-  // fullyParallel so specs still interleave. Raise this only after the backend handles concurrent
-  // unreachable-Connection handshakes without thread-pool starvation. The cap is overridable on the
-  // CLI (`--workers=N`).
+  // Worker count. Two contention sources once forced a cap of 2: per-spec /api/login (fixed by the
+  // shared storageState below, issue #24) and the backend hanging a thread 15-30s per unreachable-
+  // Connection JDBC handshake, which OOM'd the server at >=4 workers. Issue #25 fast-failed that
+  // connect (~1.5s), and the server now stays up even at 6 workers (the OOM is gone). The remaining
+  // limiter is ONE heavy spec — the connection-unreachable walk (5 real 503 round-trips) — which goes
+  // flaky above ~2 under capture load; so we keep 2 for a reliable green-gate. Follow-up: lighten that
+  // spec (or raise its per-step timeouts) to lift the cap. Overridable via `--workers=N`.
   workers: 2,
   // Log in ONCE before the suite and share an authenticated storageState across every worker, so no
   // spec hits /api/login per-test. The auth-flow specs that need an unauthenticated/!=admin state opt
